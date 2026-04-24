@@ -899,8 +899,8 @@ function FitnessHub() {
       method: 'POST',
       headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json', 'anthropic-dangerous-direct-browser-access': 'true' },
       body: JSON.stringify({
-        model: 'claude-sonnet-4-5',
-        max_tokens: 4000,
+        model: 'claude-haiku-4-5',
+        max_tokens: 3000,
         messages: [{ role: 'user', content: `You are a professional fitness chef. Create 3 DISTINCT high-protein variations of "${query}" for a ${goal.label} goal (${goal.protein}g protein target, ${goal.cal} cal/day). Each recipe must use ONLY ingredients available at Walmart.
 
 Rules:
@@ -932,11 +932,12 @@ Reply with ONLY a valid JSON array, no markdown, no explanation:
     const data = await resp.json();
     const text = data.content?.[0]?.text || '';
     try {
+      if (data.type === 'error') throw new Error(data.error?.type === 'rate_limit_error' ? 'rate_limit' : data.error?.message);
       const recipes = JSON.parse(text.replace(/```json?|```/g, '').trim());
       return Array.isArray(recipes)
         ? recipes.map((r, i) => ({ ...r, id: 'ai_' + Date.now() + i, source: 'claude', image: null, category: '🤖 AI Recipe', area: 'Walmart-Ready' }))
         : [{ ...recipes, id: 'ai_' + Date.now(), source: 'claude', image: null, category: '🤖 AI Recipe', area: 'Walmart-Ready' }];
-    } catch { return null; }
+    } catch(e) { if (e.message === 'rate_limit') throw e; return null; }
   }
 
   /* detect fitness intent — these queries need AI, not TheMealDB */
@@ -970,23 +971,18 @@ Reply with ONLY a valid JSON array, no markdown, no explanation:
       if (meals.length && !fitnessQuery) {
         setOnlineResults(meals);
       } else if (apiKey) {
-        // Fitness query OR no DB results → AI builds 3 real recipes
-        showToast('🔍 AI building recipes for you…', 'info');
-        const webRecipes = await buildRecipeFromWebSearch(searchQ);
-        if (webRecipes?.length) {
-          setOnlineResults(webRecipes);
-          showToast(`🌐 Found ${webRecipes.length} recipes!`, 'success');
+        showToast('🤖 Building recipes…', 'info');
+        const aiRecipes = await generateRecipeWithClaude(searchQ);
+        if (aiRecipes?.length) {
+          setOnlineResults(Array.isArray(aiRecipes) ? aiRecipes : [aiRecipes]);
+          showToast(`✅ ${Array.isArray(aiRecipes) ? aiRecipes.length : 1} recipes built!`, 'success');
         } else {
-          const aiRecipes = await generateRecipeWithClaude(searchQ);
-          if (aiRecipes?.length) {
-            setOnlineResults(Array.isArray(aiRecipes) ? aiRecipes : [aiRecipes]);
-            showToast(`🤖 Built ${Array.isArray(aiRecipes) ? aiRecipes.length : 1} recipes!`, 'info');
-          } else showToast('Nothing found — check your API key in Settings', 'error');
+          showToast('Rate limit hit — wait 60 seconds and try again', 'error');
         }
       } else {
-        showToast('Add your Claude API key in Settings ⚙️ for AI recipes', 'error');
+        showToast('Add your Claude API key in Settings ⚙️', 'error');
       }
-    } catch(e) { showToast('Search failed: ' + e.message, 'error'); }
+    } catch(e) { showToast('Error: ' + e.message, 'error'); }
     setSearching(false);
   }
 
@@ -1003,9 +999,9 @@ Reply with ONLY a valid JSON array, no markdown, no explanation:
           'anthropic-dangerous-direct-browser-access': 'true'
         },
         body: JSON.stringify({
-          model: 'claude-sonnet-4-5',
-          max_tokens: 4000,
-          tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: 3 }],
+          model: 'claude-haiku-4-5',
+          max_tokens: 3000,
+          tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: 2 }],
           messages: [{ role: 'user', content:
             `Search the web for "${query}" recipes. Find 3 genuinely different high-protein versions (different ingredients, cooking methods, or flavor profiles). All ingredients must be available at Walmart. Optimize for ${goal.label} goal (~${goal.protein}g protein per serving, ~${goal.cal} cal/day budget).
 
