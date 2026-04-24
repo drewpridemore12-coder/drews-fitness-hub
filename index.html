@@ -558,6 +558,7 @@ function FitnessHub() {
   const [shopTab,      setShopTab]      = useState('list');
   const [showSettings, setShowSettings] = useState(false);
   const [showBarcode,  setShowBarcode]  = useState(false);
+  const [lookingUpFood, setLookingUpFood] = useState(false);
   const [toast,        setToast]        = useState(null);
   const [badge,        setBadge]        = useState(null);
 
@@ -692,6 +693,34 @@ function FitnessHub() {
     } else {
       showToast('Product not found — enter manually', 'error');
     }
+  }
+
+  async function lookupFoodNutrition() {
+    if (!logItem.trim()) { showToast('Enter a food name first', 'error'); return; }
+    if (!apiKey) { showToast('Add Claude API key in Settings ⚙️ to use food lookup', 'error'); return; }
+    setLookingUpFood(true);
+    try {
+      const resp = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+        body: JSON.stringify({
+          model: 'claude-haiku-4-5',
+          max_tokens: 200,
+          messages: [{ role: 'user', content: `Give the nutrition facts for: "${logItem.trim()}" (1 standard serving).
+Reply with ONLY valid JSON, no markdown:
+{"calories":000,"protein":0,"carbs":0,"fat":0,"serving":"description"}` }]
+        })
+      });
+      const data = await resp.json();
+      const text = data.content?.[0]?.text || '';
+      const nutrition = JSON.parse(text.replace(/```json?|```/g, '').trim());
+      setLogCal(String(nutrition.calories || ''));
+      setLogPro(String(nutrition.protein || ''));
+      setLogCarb(String(nutrition.carbs || ''));
+      setLogFat(String(nutrition.fat || ''));
+      showToast(`Found: ${nutrition.serving || 'macros filled!'}`, 'success');
+    } catch { showToast('Lookup failed — fill in manually', 'error'); }
+    setLookingUpFood(false);
   }
 
   function addFoodEntry() {
@@ -1136,11 +1165,15 @@ Reply with ONLY valid JSON (no markdown):
         <div style={{ fontFamily: "'Bebas Neue',sans-serif", fontSize: 22, color: '#fff', marginBottom: 14, letterSpacing: 1 }}>FOOD LOG</div>
 
         <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 18, padding: 16, border: '1px solid rgba(255,255,255,0.06)', marginBottom: 14 }}>
-          <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
+          <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
             <input value={logItem} onChange={e => setLogItem(e.target.value)} placeholder="Food name — or tap 📷 to scan"
               style={{ ...inputS, flex: 1 }} onKeyDown={e => e.key === 'Enter' && addFoodEntry()} />
             <button onClick={() => setShowBarcode(true)} style={{ width: 46, height: 46, borderRadius: 12, border: '1px solid rgba(75,222,128,0.35)', background: 'rgba(75,222,128,0.1)', color: '#4BDE80', fontSize: 20, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>📷</button>
           </div>
+          <button onClick={lookupFoodNutrition} disabled={lookingUpFood || !logItem.trim()}
+            style={{ width: '100%', marginBottom: 10, padding: '9px 14px', borderRadius: 11, border: '1px solid rgba(74,158,255,0.35)', background: lookingUpFood ? 'rgba(74,158,255,0.05)' : 'rgba(74,158,255,0.1)', color: '#4A9EFF', fontFamily: "'Oswald',sans-serif", fontSize: 13, fontWeight: 700, cursor: 'pointer', letterSpacing: 0.5, opacity: (!logItem.trim()) ? 0.4 : 1 }}>
+            {lookingUpFood ? '🔍 LOOKING UP…' : '🔍 AUTO-FILL NUTRITION (AI)'}
+          </button>
           {barcodeData && (
             <div style={{ padding: '8px 10px', borderRadius: 10, background: 'rgba(75,222,128,0.08)', border: '1px solid rgba(75,222,128,0.2)', marginBottom: 10, fontSize: 11, color: '#4BDE80' }}>
               📦 Scanned: {barcodeData.name} — per 100g: {barcodeData.cal} cal · {barcodeData.protein}g P
