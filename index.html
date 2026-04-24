@@ -939,45 +939,54 @@ Reply with ONLY a valid JSON array, no markdown, no explanation:
     } catch { return null; }
   }
 
+  /* detect fitness intent — these queries need AI, not TheMealDB */
+  function hasFitnessIntent(q) {
+    const terms = ['high protein','low calorie','low carb','macro','keto','bulk','cut','recomp',
+      'lean','muscle','fitness','bodybuilder','meal prep','healthy','low fat','high fiber'];
+    return terms.some(t => q.toLowerCase().includes(t));
+  }
+
   async function searchRecipes() {
     if (!searchQ.trim()) return;
     setSearching(true); setOnlineResults([]);
     try {
-      // Try 1: exact query
-      let meals = await tryMDBSearch(searchQ.trim());
-      // Try 2: cleaned query (strip qualifiers like "high protein")
-      if (!meals.length) {
-        const cleaned = cleanSearchQuery(searchQ);
-        if (cleaned && cleaned !== searchQ.toLowerCase()) meals = await tryMDBSearch(cleaned);
-      }
-      // Try 3: last 1-2 meaningful words
-      if (!meals.length) {
-        const words = cleanSearchQuery(searchQ).split(' ').filter(w => w.length > 2);
-        if (words.length > 1) meals = await tryMDBSearch(words.slice(-2).join(' '));
-        if (!meals.length && words.length) meals = await tryMDBSearch(words[words.length - 1]);
+      const fitnessQuery = hasFitnessIntent(searchQ);
+
+      // Skip TheMealDB entirely for fitness queries — it doesn't have macro-optimized recipes
+      let meals = [];
+      if (!fitnessQuery) {
+        meals = await tryMDBSearch(searchQ.trim());
+        if (!meals.length) {
+          const cleaned = cleanSearchQuery(searchQ);
+          if (cleaned && cleaned !== searchQ.toLowerCase()) meals = await tryMDBSearch(cleaned);
+        }
+        if (!meals.length) {
+          const words = cleanSearchQuery(searchQ).split(' ').filter(w => w.length > 2);
+          if (words.length > 1) meals = await tryMDBSearch(words.slice(-2).join(' '));
+          if (!meals.length && words.length) meals = await tryMDBSearch(words[words.length - 1]);
+        }
       }
 
-      if (meals.length) {
+      if (meals.length && !fitnessQuery) {
         setOnlineResults(meals);
       } else if (apiKey) {
-        // Try 4: Claude web-search agent finds & builds 3 real recipes
-        showToast('🔍 AI searching the web for recipes…', 'info');
+        // Fitness query OR no DB results → AI builds 3 real recipes
+        showToast('🔍 AI building recipes for you…', 'info');
         const webRecipes = await buildRecipeFromWebSearch(searchQ);
         if (webRecipes?.length) {
           setOnlineResults(webRecipes);
           showToast(`🌐 Found ${webRecipes.length} recipes!`, 'success');
         } else {
-          // Try 5: pure Claude generation — 3 distinct variations
           const aiRecipes = await generateRecipeWithClaude(searchQ);
           if (aiRecipes?.length) {
             setOnlineResults(Array.isArray(aiRecipes) ? aiRecipes : [aiRecipes]);
-            showToast(`🤖 AI built ${Array.isArray(aiRecipes) ? aiRecipes.length : 1} recipes for you!`, 'info');
-          } else showToast('Nothing found', 'error');
+            showToast(`🤖 Built ${Array.isArray(aiRecipes) ? aiRecipes.length : 1} recipes!`, 'info');
+          } else showToast('Nothing found — check your API key in Settings', 'error');
         }
       } else {
-        showToast('No results — add Claude API key in Settings for AI recipes', 'error');
+        showToast('Add your Claude API key in Settings ⚙️ for AI recipes', 'error');
       }
-    } catch { showToast('Search failed', 'error'); }
+    } catch(e) { showToast('Search failed: ' + e.message, 'error'); }
     setSearching(false);
   }
 
