@@ -787,21 +787,82 @@ function FitnessHub() {
     setCoachLoading(false);
   }
 
-  /* ── Online Recipe Search (TheMealDB) ── */
+  /* ── Online Recipe Search (TheMealDB + Claude fallback) ── */
+  function cleanSearchQuery(q) {
+    // Strip common qualifiers TheMealDB won't understand
+    const strip = ['high protein','low calorie','low carb','healthy','easy','quick','simple',
+      'homemade','best','keto','paleo','vegan','vegetarian','gluten free','dairy free',
+      'macro friendly','bodybuilder','bulking','cutting','meal prep'];
+    let cleaned = q.toLowerCase();
+    strip.forEach(w => { cleaned = cleaned.replace(w, ''); });
+    return cleaned.replace(/\s+/g, ' ').trim();
+  }
+
+  async function tryMDBSearch(query) {
+    const r = await fetch(`https://www.themealdb.com/api/json/v1/1/search.php?s=${encodeURIComponent(query)}`);
+    const d = await r.json();
+    return (d.meals || []).map(m => ({
+      id: 'mdb_' + m.idMeal, name: m.strMeal,
+      image: m.strMealThumb, category: m.strCategory, area: m.strArea,
+      ingredients: buildMDBIngredients(m), instructions: m.strInstructions,
+      calories: 0, protein: 0, carbs: 0, fat: 0, baseServings: 2, source: 'themealdb'
+    }));
+  }
+
+  async function generateRecipeWithClaude(query) {
+    if (!apiKey) return null;
+    const goal = GOAL_PRESETS[userGoal] || GOAL_PRESETS.recomp;
+    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5',
+        max_tokens: 900,
+        messages: [{ role: 'user', content: `Create a fitness-optimized recipe for: "${query}".
+User goal: ${goal.label} (${goal.protein}g protein, ${goal.cal} cal/day).
+Reply with ONLY valid JSON (no markdown):
+{"name":"...","ingredients":[{"name":"...","amount":"..."}],"instructions":"Step 1: ... Step 2: ...","calories":000,"protein":00,"carbs":00,"fat":00,"baseServings":2,"macroTip":"..."}` }]
+      })
+    });
+    const data = await resp.json();
+    const text = data.content?.[0]?.text || '';
+    try {
+      const recipe = JSON.parse(text.replace(/```json?|```/g, '').trim());
+      return { ...recipe, id: 'ai_' + Date.now(), source: 'claude', image: null, category: 'AI Generated', area: '' };
+    } catch { return null; }
+  }
+
   async function searchRecipes() {
     if (!searchQ.trim()) return;
     setSearching(true); setOnlineResults([]);
     try {
-      const r = await fetch(`https://www.themealdb.com/api/json/v1/1/search.php?s=${encodeURIComponent(searchQ)}`);
-      const d = await r.json();
-      const meals = (d.meals || []).map(m => ({
-        id: 'mdb_' + m.idMeal, name: m.strMeal,
-        image: m.strMealThumb, category: m.strCategory, area: m.strArea,
-        ingredients: buildMDBIngredients(m), instructions: m.strInstructions,
-        calories: 0, protein: 0, carbs: 0, fat: 0, baseServings: 2, source: 'themealdb'
-      }));
-      setOnlineResults(meals);
-      if (!meals.length) showToast('No results found', 'error');
+      // Try 1: exact query
+      let meals = await tryMDBSearch(searchQ.trim());
+      // Try 2: cleaned query (strip qualifiers like "high protein")
+      if (!meals.length) {
+        const cleaned = cleanSearchQuery(searchQ);
+        if (cleaned && cleaned !== searchQ.toLowerCase()) meals = await tryMDBSearch(cleaned);
+      }
+      // Try 3: last 1-2 meaningful words
+      if (!meals.length) {
+        const words = cleanSearchQuery(searchQ).split(' ').filter(w => w.length > 2);
+        if (words.length > 1) meals = await tryMDBSearch(words.slice(-2).join(' '));
+        if (!meals.length && words.length) meals = await tryMDBSearch(words[words.length - 1]);
+      }
+
+      if (meals.length) {
+        setOnlineResults(meals);
+      } else {
+        // Try 4: Claude-generated recipe
+        showToast('No DB results — asking AI…', 'info');
+        const aiRecipe = await generateRecipeWithClaude(searchQ);
+        if (aiRecipe) {
+          setOnlineResults([aiRecipe]);
+          showToast('AI generated a recipe for you! 🤖', 'info');
+        } else {
+          showToast(apiKey ? 'Nothing found' : 'No results — add Claude API key in Settings for AI recipes', 'error');
+        }
+      }
     } catch { showToast('Search failed', 'error'); }
     setSearching(false);
   }
