@@ -559,6 +559,8 @@ function FitnessHub() {
   const [showSettings, setShowSettings] = useState(false);
   const [showBarcode,  setShowBarcode]  = useState(false);
   const [lookingUpFood, setLookingUpFood] = useState(false);
+  const [swappingRecipe, setSwappingRecipe] = useState(false);
+  const [recipeSwaps,   setRecipeSwaps]   = useState(null);
   const [toast,        setToast]        = useState(null);
   const [badge,        setBadge]        = useState(null);
 
@@ -615,6 +617,34 @@ function FitnessHub() {
   useEffect(() => {
     if (showSettings) { setSKey(apiKey); setSUrl(vercelUrl); setSBudget(String(weekBudget)); }
   }, [showSettings]);
+
+  /* ── cross-device sync via URL hash ── */
+  useEffect(() => {
+    const hash = window.location.hash;
+    if (hash.startsWith('#sync=')) {
+      try {
+        const s = JSON.parse(atob(hash.slice(6)));
+        if (s.k) { setApiKey(s.k);     save('claudeKey',  s.k); }
+        if (s.v) { setVercelUrl(s.v);  save('vercelUrl',  s.v); }
+        if (s.g) { setUserGoal(s.g);   save('userGoal',   s.g); }
+        if (s.b) { setWeekBudget(s.b); save('weekBudget', s.b); }
+        window.history.replaceState(null, '', window.location.pathname);
+        showToast('⚡ Settings synced from link!', 'success');
+      } catch {}
+    }
+  }, []);
+
+  function generateSyncLink() {
+    const s = {};
+    if (apiKey)    s.k = apiKey;
+    if (vercelUrl) s.v = vercelUrl;
+    if (userGoal)  s.g = userGoal;
+    if (weekBudget) s.b = weekBudget;
+    const url = `${location.origin}${location.pathname}#sync=${btoa(JSON.stringify(s))}`;
+    navigator.clipboard?.writeText(url).catch(() => {});
+    showToast('📋 Sync link copied — bookmark it on your other devices!', 'success');
+    return url;
+  }
 
   /* ── computed macros ── */
   const goal      = GOAL_PRESETS[userGoal] || GOAL_PRESETS.recomp;
@@ -695,10 +725,9 @@ function FitnessHub() {
     }
   }
 
-  async function lookupFoodNutrition() {
-    if (!logItem.trim()) { showToast('Enter a food name first', 'error'); return; }
-    if (!apiKey) { showToast('Add Claude API key in Settings ⚙️ to use food lookup', 'error'); return; }
-    setLookingUpFood(true);
+  /* shared nutrition fetch — returns {calories,protein,carbs,fat,serving} or null */
+  async function fetchFoodNutrition(foodName) {
+    if (!foodName.trim() || !apiKey) return null;
     try {
       const resp = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
@@ -706,29 +735,49 @@ function FitnessHub() {
         body: JSON.stringify({
           model: 'claude-haiku-4-5',
           max_tokens: 200,
-          messages: [{ role: 'user', content: `Give the nutrition facts for: "${logItem.trim()}" (1 standard serving).
-Reply with ONLY valid JSON, no markdown:
-{"calories":000,"protein":0,"carbs":0,"fat":0,"serving":"description"}` }]
+          messages: [{ role: 'user', content: `Nutrition facts for: "${foodName}" (1 standard serving). Reply ONLY valid JSON no markdown:\n{"calories":0,"protein":0,"carbs":0,"fat":0,"serving":"size description"}` }]
         })
       });
       const data = await resp.json();
       const text = data.content?.[0]?.text || '';
-      const nutrition = JSON.parse(text.replace(/```json?|```/g, '').trim());
-      setLogCal(String(nutrition.calories || ''));
-      setLogPro(String(nutrition.protein || ''));
-      setLogCarb(String(nutrition.carbs || ''));
-      setLogFat(String(nutrition.fat || ''));
-      showToast(`Found: ${nutrition.serving || 'macros filled!'}`, 'success');
-    } catch { showToast('Lookup failed — fill in manually', 'error'); }
+      return JSON.parse(text.replace(/```json?|```/g, '').trim());
+    } catch { return null; }
+  }
+
+  async function lookupFoodNutrition() {
+    if (!logItem.trim()) { showToast('Enter a food name first', 'error'); return; }
+    if (!apiKey) { showToast('Add Claude API key in Settings ⚙️', 'error'); return; }
+    setLookingUpFood(true);
+    const n = await fetchFoodNutrition(logItem.trim());
+    if (n) {
+      setLogCal(String(n.calories || '')); setLogPro(String(n.protein || ''));
+      setLogCarb(String(n.carbs || ''));   setLogFat(String(n.fat || ''));
+      showToast(`✓ ${n.serving || 'Macros filled!'}`, 'success');
+    } else { showToast('Lookup failed — fill in manually', 'error'); }
     setLookingUpFood(false);
   }
 
-  function addFoodEntry() {
+  async function addFoodEntry() {
     if (!logItem.trim()) return;
+    let cal  = parseFloat(logCal)  || 0;
+    let pro  = parseFloat(logPro)  || 0;
+    let carb = parseFloat(logCarb) || 0;
+    let fat  = parseFloat(logFat)  || 0;
+    /* auto-lookup macros if all fields are empty and API key is set */
+    if (cal === 0 && pro === 0 && fat === 0 && apiKey) {
+      setLookingUpFood(true);
+      const n = await fetchFoodNutrition(logItem.trim());
+      setLookingUpFood(false);
+      if (n) {
+        cal = n.calories || 0; pro = n.protein || 0;
+        carb = n.carbs || 0;   fat = n.fat || 0;
+        setLogCal(String(cal)); setLogPro(String(pro));
+        setLogCarb(String(carb)); setLogFat(String(fat));
+      }
+    }
     const entry = {
       id: Date.now(), date: todayStr(), name: logItem.trim(),
-      cal: parseFloat(logCal) || 0, protein: parseFloat(logPro) || 0,
-      carbs: parseFloat(logCarb) || 0, fat: parseFloat(logFat) || 0,
+      cal, protein: pro, carbs: carb, fat,
       time: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
     };
     setEntries(p => [...p, entry]);
@@ -881,19 +930,77 @@ Reply with ONLY valid JSON (no markdown):
 
       if (meals.length) {
         setOnlineResults(meals);
-      } else {
-        // Try 4: Claude-generated recipe
-        showToast('No DB results — asking AI…', 'info');
-        const aiRecipe = await generateRecipeWithClaude(searchQ);
-        if (aiRecipe) {
-          setOnlineResults([aiRecipe]);
-          showToast('AI generated a recipe for you! 🤖', 'info');
+      } else if (apiKey) {
+        // Try 4: Claude web-search agent builds a real recipe
+        showToast('🔍 AI searching the web for a recipe…', 'info');
+        const webRecipe = await buildRecipeFromWebSearch(searchQ);
+        if (webRecipe) {
+          setOnlineResults([webRecipe]);
+          showToast('🌐 Recipe found & built for you!', 'success');
         } else {
-          showToast(apiKey ? 'Nothing found' : 'No results — add Claude API key in Settings for AI recipes', 'error');
+          // Try 5: pure Claude generation fallback
+          const aiRecipe = await generateRecipeWithClaude(searchQ);
+          if (aiRecipe) { setOnlineResults([aiRecipe]); showToast('🤖 AI built a recipe for you!', 'info'); }
+          else showToast('Nothing found', 'error');
         }
+      } else {
+        showToast('No results — add Claude API key in Settings for AI recipes', 'error');
       }
     } catch { showToast('Search failed', 'error'); }
     setSearching(false);
+  }
+
+  /* sub-agent: uses Claude web_search to find a real recipe, then formats it */
+  async function buildRecipeFromWebSearch(query) {
+    if (!apiKey) return null;
+    const goal = GOAL_PRESETS[userGoal] || GOAL_PRESETS.recomp;
+    try {
+      const resp = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'x-api-key': apiKey, 'anthropic-version': '2023-06-01',
+          'content-type': 'application/json', 'anthropic-beta': 'web-search-2025-03-05'
+        },
+        body: JSON.stringify({
+          model: 'claude-haiku-4-5-20251001',
+          max_tokens: 1200,
+          tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: 3 }],
+          messages: [{ role: 'user', content:
+            `Search for the best high-protein "${query}" recipe. Requirements: high protein, uses ingredients ONLY available at Walmart, optimized for ${goal.label} goal (target ~${goal.protein}g protein/serving). After searching, reply with ONLY valid JSON no markdown:\n{"name":"...","ingredients":[{"name":"walmart item","amount":"..."}],"instructions":"Step 1: ... Step 2: ...","calories":0,"protein":0,"carbs":0,"fat":0,"baseServings":2,"macroTip":"...","swapTips":["swap to boost protein","swap to cut calories"]}`
+          }]
+        })
+      });
+      const data = await resp.json();
+      const textBlock = (data.content || []).find(b => b.type === 'text');
+      if (!textBlock) return null;
+      const recipe = JSON.parse(textBlock.text.replace(/```json?|```/g, '').trim());
+      return { ...recipe, id: 'web_' + Date.now(), source: 'web', image: null, category: '🌐 Web Recipe', area: 'Walmart-Ready' };
+    } catch { return null; }
+  }
+
+  /* protein swap suggestions for a recipe */
+  async function getProteinSwaps(recipe) {
+    if (!apiKey) { showToast('Add Claude API key in Settings ⚙️', 'error'); return; }
+    setSwappingRecipe(true); setRecipeSwaps(null);
+    try {
+      const ings = (recipe.ingredients || []).map(i => (typeof i === 'string' ? i : i.name)).join(', ');
+      const resp = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+        body: JSON.stringify({
+          model: 'claude-haiku-4-5',
+          max_tokens: 600,
+          messages: [{ role: 'user', content:
+            `Recipe: "${recipe.name}"\nIngredients: ${ings}\nCurrent: ~${recipe.calories || '?'} cal, ~${recipe.protein || '?'}g protein.\nSuggest 4 specific swaps to boost protein and/or cut calories. Walmart-available items only.\nReply ONLY valid JSON array no markdown:\n[{"original":"item in recipe","swap":"replacement","walmartProduct":"exact product name","proteinChange":"+Xg or -Xg","calChange":"+X or -X","tip":"why it works"}]`
+          }]
+        })
+      });
+      const data = await resp.json();
+      const text = data.content?.[0]?.text || '';
+      const swaps = JSON.parse(text.replace(/```json?|```/g, '').trim());
+      setRecipeSwaps(swaps);
+    } catch { showToast('Could not get swap suggestions', 'error'); }
+    setSwappingRecipe(false);
   }
 
   function buildMDBIngredients(m) {
@@ -1170,10 +1277,11 @@ Reply with ONLY valid JSON (no markdown):
               style={{ ...inputS, flex: 1 }} onKeyDown={e => e.key === 'Enter' && addFoodEntry()} />
             <button onClick={() => setShowBarcode(true)} style={{ width: 46, height: 46, borderRadius: 12, border: '1px solid rgba(75,222,128,0.35)', background: 'rgba(75,222,128,0.1)', color: '#4BDE80', fontSize: 20, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>📷</button>
           </div>
-          <button onClick={lookupFoodNutrition} disabled={lookingUpFood || !logItem.trim()}
-            style={{ width: '100%', marginBottom: 10, padding: '9px 14px', borderRadius: 11, border: '1px solid rgba(74,158,255,0.35)', background: lookingUpFood ? 'rgba(74,158,255,0.05)' : 'rgba(74,158,255,0.1)', color: '#4A9EFF', fontFamily: "'Oswald',sans-serif", fontSize: 13, fontWeight: 700, cursor: 'pointer', letterSpacing: 0.5, opacity: (!logItem.trim()) ? 0.4 : 1 }}>
-            {lookingUpFood ? '🔍 LOOKING UP…' : '🔍 AUTO-FILL NUTRITION (AI)'}
-          </button>
+          {lookingUpFood && (
+            <div style={{ textAlign: 'center', padding: '6px 0 8px', fontSize: 12, color: '#4A9EFF', letterSpacing: 0.5 }}>
+              🔍 Looking up nutrition…
+            </div>
+          )}
           {barcodeData && (
             <div style={{ padding: '8px 10px', borderRadius: 10, background: 'rgba(75,222,128,0.08)', border: '1px solid rgba(75,222,128,0.2)', marginBottom: 10, fontSize: 11, color: '#4BDE80' }}>
               📦 Scanned: {barcodeData.name} — per 100g: {barcodeData.cal} cal · {barcodeData.protein}g P
@@ -1380,9 +1488,36 @@ Reply with ONLY valid JSON (no markdown):
                 const r = await enrichRecipeWithMacros(activeRecipe);
                 setActiveRecipe(r);
                 if (saved.find(s => s.id === r.id)) setSaved(p => p.map(s => s.id === r.id ? r : s));
-              }} style={{ width: '100%', padding: 12, borderRadius: 12, border: '1px solid rgba(245,200,66,0.3)', background: 'rgba(245,200,66,0.08)', color: '#F5C842', fontFamily: "'Oswald',sans-serif", fontSize: 14, cursor: 'pointer' }}>
+              }} style={{ width: '100%', padding: 12, borderRadius: 12, border: '1px solid rgba(245,200,66,0.3)', background: 'rgba(245,200,66,0.08)', color: '#F5C842', fontFamily: "'Oswald',sans-serif", fontSize: 14, cursor: 'pointer', marginBottom: 8 }}>
                 ✨ ESTIMATE MACROS WITH AI
               </button>
+            )}
+
+            <button onClick={() => { setRecipeSwaps(null); getProteinSwaps(activeRecipe); }}
+              disabled={swappingRecipe}
+              style={{ width: '100%', padding: 12, borderRadius: 12, border: '1px solid rgba(75,222,128,0.3)', background: swappingRecipe ? 'rgba(75,222,128,0.03)' : 'rgba(75,222,128,0.08)', color: '#4BDE80', fontFamily: "'Oswald',sans-serif", fontSize: 14, cursor: 'pointer', marginBottom: 8 }}>
+              {swappingRecipe ? '🔄 FINDING SWAPS…' : '🔄 HIGH PROTEIN SWAPS (WALMART)'}
+            </button>
+
+            {recipeSwaps && (
+              <div style={{ background: 'rgba(75,222,128,0.05)', border: '1px solid rgba(75,222,128,0.15)', borderRadius: 14, padding: 14, marginBottom: 8 }}>
+                <div style={{ fontFamily: "'Oswald',sans-serif", fontSize: 13, color: '#4BDE80', letterSpacing: 1, marginBottom: 10 }}>💪 PROTEIN SWAP IDEAS</div>
+                {recipeSwaps.map((s, i) => (
+                  <div key={i} style={{ marginBottom: 10, paddingBottom: 10, borderBottom: i < recipeSwaps.length - 1 ? '1px solid rgba(255,255,255,0.05)' : 'none' }}>
+                    <div style={{ fontSize: 12, color: '#fff', marginBottom: 3 }}>
+                      <span style={{ color: '#aaa', textDecoration: 'line-through' }}>{s.original}</span>
+                      <span style={{ color: '#4BDE80', margin: '0 6px' }}>→</span>
+                      <span style={{ fontWeight: 600 }}>{s.swap}</span>
+                    </div>
+                    <div style={{ fontSize: 11, color: '#888', marginBottom: 2 }}>🛒 Walmart: <span style={{ color: '#aaa' }}>{s.walmartProduct}</span></div>
+                    <div style={{ display: 'flex', gap: 8, fontSize: 11 }}>
+                      {s.proteinChange && <span style={{ color: '#4A9EFF' }}>Protein: {s.proteinChange}</span>}
+                      {s.calChange && <span style={{ color: '#FF6B4A' }}>Cals: {s.calChange}</span>}
+                    </div>
+                    {s.tip && <div style={{ fontSize: 11, color: '#666', marginTop: 2, fontStyle: 'italic' }}>{s.tip}</div>}
+                  </div>
+                ))}
+              </div>
             )}
             <div style={{ height: 80 }} />
           </div>
@@ -1683,9 +1818,20 @@ Reply with ONLY valid JSON (no markdown):
             setApiKey(sKey); setVercelUrl(sUrl);
             setWeekBudget(parseFloat(sBudget) || 150);
             setShowSettings(false); showToast('Settings saved ✓', 'success');
-          }} style={{ width: '100%', padding: 15, borderRadius: 14, border: 'none', background: '#4BDE80', color: '#000', fontFamily: "'Oswald',sans-serif", fontSize: 18, fontWeight: 700, cursor: 'pointer', letterSpacing: 0.5 }}>
+          }} style={{ width: '100%', padding: 15, borderRadius: 14, border: 'none', background: '#4BDE80', color: '#000', fontFamily: "'Oswald',sans-serif", fontSize: 18, fontWeight: 700, cursor: 'pointer', letterSpacing: 0.5, marginBottom: 10 }}>
             SAVE SETTINGS
           </button>
+
+          <button onClick={() => {
+            // Save first so sync link has latest values
+            setApiKey(sKey); setVercelUrl(sUrl); setWeekBudget(parseFloat(sBudget) || 150);
+            setTimeout(generateSyncLink, 50);
+          }} style={{ width: '100%', padding: 13, borderRadius: 14, border: '1px solid rgba(74,158,255,0.35)', background: 'rgba(74,158,255,0.08)', color: '#4A9EFF', fontFamily: "'Oswald',sans-serif", fontSize: 15, fontWeight: 700, cursor: 'pointer', letterSpacing: 0.5 }}>
+            📱 COPY SYNC LINK (FOR OTHER DEVICES)
+          </button>
+          <div style={{ fontSize: 11, color: '#555', textAlign: 'center', marginTop: 6 }}>
+            Opens your app pre-loaded with API key & settings on any device
+          </div>
         </div>
       </div>
     );
