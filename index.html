@@ -900,33 +900,8 @@ function FitnessHub() {
       headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json', 'anthropic-dangerous-direct-browser-access': 'true' },
       body: JSON.stringify({
         model: 'claude-haiku-4-5',
-        max_tokens: 3000,
-        messages: [{ role: 'user', content: `You are a professional fitness chef. Create 3 DISTINCT high-protein variations of "${query}" for a ${goal.label} goal (${goal.protein}g protein target, ${goal.cal} cal/day). Each recipe must use ONLY ingredients available at Walmart.
-
-Rules:
-- Each variation must be genuinely different (different protein source, cooking method, or flavor profile)
-- Write REAL, detailed cooking instructions — include exact temperatures (°F), cook times, pan sizes, visual cues ("cook until golden brown"), and technique tips
-- Use realistic Walmart ingredient names and exact amounts (cups, oz, tbsp, etc.)
-- Macros must be accurate per serving
-
-Reply with ONLY a valid JSON array, no markdown, no explanation:
-[
-  {
-    "name": "specific descriptive name",
-    "ingredients": [{"name": "Great Value Chicken Breast", "amount": "1 lb"}, ...],
-    "instructions": "1. Preheat oven to 375°F. Pat chicken dry with paper towels...\\n2. In a large bowl, combine...\\n3. Heat a 12-inch oven-safe skillet over medium-high heat...",
-    "calories": 420,
-    "protein": 45,
-    "carbs": 38,
-    "fat": 9,
-    "baseServings": 2,
-    "prepTime": "10 min",
-    "cookTime": "25 min",
-    "macroTip": "specific tip about the protein/macro strategy"
-  },
-  { ... second variation ... },
-  { ... third variation ... }
-]` }]
+        max_tokens: 2000,
+        messages: [{ role: 'user', content: `Fitness chef. 3 distinct high-protein "${query}" recipes for ${goal.label} goal (${goal.protein}g protein, ${goal.cal} cal). Walmart ingredients only. Different protein sources.\n\nJSON array only, no markdown:\n[{"name":"...","ingredients":[{"name":"...","amount":"..."}],"instructions":"1. ...\\n2. ...\\n3. ...\\n4. ...\\n5. ...","calories":0,"protein":0,"carbs":0,"fat":0,"baseServings":2,"prepTime":"X min","cookTime":"X min","macroTip":"..."},...]` }]
       })
     });
     const data = await resp.json();
@@ -971,18 +946,18 @@ Reply with ONLY a valid JSON array, no markdown, no explanation:
       if (meals.length && !fitnessQuery) {
         setOnlineResults(meals);
       } else if (apiKey) {
-        showToast('🤖 Building recipes…', 'info');
+        showToast('🤖 Building recipes… (10-20 sec)', 'info');
         const aiRecipes = await generateRecipeWithClaude(searchQ);
         if (aiRecipes?.length) {
           setOnlineResults(Array.isArray(aiRecipes) ? aiRecipes : [aiRecipes]);
-          showToast(`✅ ${Array.isArray(aiRecipes) ? aiRecipes.length : 1} recipes built!`, 'success');
+          showToast(`✅ ${Array.isArray(aiRecipes) ? aiRecipes.length : 1} recipes ready!`, 'success');
         } else {
-          showToast('Rate limit hit — wait 60 seconds and try again', 'error');
+          showToast('AI returned no results — try again', 'error');
         }
       } else {
         showToast('Add your Claude API key in Settings ⚙️', 'error');
       }
-    } catch(e) { showToast('Error: ' + e.message, 'error'); }
+    } catch(e) { showToast('Error: ' + (e.message || 'unknown'), 'error'); }
     setSearching(false);
   }
 
