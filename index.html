@@ -551,6 +551,7 @@ function FitnessHub() {
   const [grocLog,    setGrocLog]    = useState(() => load('grocLog', []));
   const [apiKey,     setApiKey]     = useState(() => load('claudeKey', ''));
   const [vercelUrl,  setVercelUrl]  = useState(() => load('vercelUrl', ''));
+  const [vaultName,  setVaultName]  = useState(() => load('vaultName', ''));
 
   /* ── ephemeral UI ── */
   const [screen,       setScreen]       = useState('home');
@@ -597,9 +598,10 @@ function FitnessHub() {
   const [addToDay, setAddToDay] = useState(null);
 
   /* ── settings modal staging (synced from real state when modal opens) ── */
-  const [sKey,    setSKey]    = useState('');
-  const [sUrl,    setSUrl]    = useState('');
-  const [sBudget, setSBudget] = useState('150');
+  const [sKey,       setSKey]       = useState('');
+  const [sUrl,       setSUrl]       = useState('');
+  const [sBudget,    setSBudget]    = useState('150');
+  const [sVaultName, setSVaultName] = useState('');
 
   /* ── persist on change ── */
   useEffect(() => save('savedRecipes',           saved),      [saved]);
@@ -612,10 +614,11 @@ function FitnessHub() {
   useEffect(() => save('grocLog',                grocLog),    [grocLog]);
   useEffect(() => save('claudeKey',              apiKey),     [apiKey]);
   useEffect(() => save('vercelUrl',              vercelUrl),  [vercelUrl]);
+  useEffect(() => save('vaultName',              vaultName),  [vaultName]);
   useEffect(() => save('entries_' + todayStr(),  entries),    [entries]);
   /* sync settings staging state whenever the modal opens */
   useEffect(() => {
-    if (showSettings) { setSKey(apiKey); setSUrl(vercelUrl); setSBudget(String(weekBudget)); }
+    if (showSettings) { setSKey(apiKey); setSUrl(vercelUrl); setSBudget(String(weekBudget)); setSVaultName(vaultName); }
   }, [showSettings]);
 
   /* ── cross-device sync via URL hash ── */
@@ -628,6 +631,7 @@ function FitnessHub() {
         if (s.v) { setVercelUrl(s.v);  save('vercelUrl',  s.v); }
         if (s.g) { setUserGoal(s.g);   save('userGoal',   s.g); }
         if (s.b) { setWeekBudget(s.b); save('weekBudget', s.b); }
+        if (s.n) { setVaultName(s.n);  save('vaultName',  s.n); }
         window.history.replaceState(null, '', window.location.pathname);
         showToast('⚡ Settings synced from link!', 'success');
       } catch {}
@@ -640,6 +644,7 @@ function FitnessHub() {
     if (vercelUrl) s.v = vercelUrl;
     if (userGoal)  s.g = userGoal;
     if (weekBudget) s.b = weekBudget;
+    if (vaultName) s.n = vaultName;
     const url = `${location.origin}${location.pathname}#sync=${btoa(JSON.stringify(s))}`;
     navigator.clipboard?.writeText(url).catch(() => {});
     showToast('📋 Sync link copied — bookmark it on your other devices!', 'success');
@@ -1134,24 +1139,16 @@ Reply with ONLY valid JSON (no markdown):
     return `# Workout — ${session.date}\n**${session.workout}**\nDuration: ${Math.floor((session.duration || 0) / 60)}m ${(session.duration || 0) % 60}s\n\n${lines}\n\n---\n*Logged in Drew's Fitness Hub*\n`;
   }
 
-  async function exportToObsidian() {
-    if (!('showDirectoryPicker' in window)) {
-      const blob = new Blob([generateDailyLog()], { type: 'text/markdown' });
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
-      a.download = `${todayStr()}-daily-log.md`;
-      a.click();
-      showToast('Downloaded daily log (browser fallback)', 'success');
-      return;
-    }
+  const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+
+  /* ── Desktop export: File System Access API ── */
+  async function exportToObsidianDesktop() {
     try {
       const dir = await window.showDirectoryPicker({ mode: 'readwrite' });
       const mkDir = async (parent, name) => { try { return await parent.getDirectoryHandle(name, { create: true }); } catch { return parent; } };
-
       const logsDir = await mkDir(dir, 'Daily Logs');
       const lf = await logsDir.getFileHandle(`${todayStr()}.md`, { create: true });
       const lw = await lf.createWritable(); await lw.write(generateDailyLog()); await lw.close();
-
       if (vault.length > 0) {
         const lastWo = vault[vault.length - 1];
         const woDir = await mkDir(dir, 'Workouts');
@@ -1160,8 +1157,44 @@ Reply with ONLY valid JSON (no markdown):
       }
       showToast('Exported to Obsidian vault! 📁', 'success');
     } catch (e) {
-      if (e.name !== 'AbortError') showToast('Export failed — use download fallback', 'error');
+      if (e.name !== 'AbortError') showToast('Export failed', 'error');
     }
+  }
+
+  /* ── Mobile export: Obsidian URI deep-link ── */
+  function exportToObsidianMobile(type = 'log') {
+    const name = type === 'log'
+      ? `Daily Logs/${todayStr()}`
+      : vault.length > 0 ? `Workouts/${vault[vault.length-1].date}-workout` : `Workouts/${todayStr()}-workout`;
+    const content = type === 'log' ? generateDailyLog() : (vault.length > 0 ? generateWorkoutMd(vault[vault.length-1]) : '# No workouts yet');
+    const vn = vaultName.trim();
+    const uri = `obsidian://new?${vn ? `vault=${encodeURIComponent(vn)}&` : ''}name=${encodeURIComponent(name)}&content=${encodeURIComponent(content)}`;
+    window.location.href = uri;
+    showToast('Opening Obsidian…', 'info');
+  }
+
+  /* ── Mobile export: Web Share API (share .md file) ── */
+  async function shareAsMdFile(type = 'log') {
+    const filename = type === 'log' ? `${todayStr()}-daily-log.md` : `${todayStr()}-workout.md`;
+    const content  = type === 'log' ? generateDailyLog() : (vault.length > 0 ? generateWorkoutMd(vault[vault.length-1]) : '# No workouts yet');
+    const file = new File([content], filename, { type: 'text/markdown' });
+    if (navigator.canShare?.({ files: [file] })) {
+      try { await navigator.share({ files: [file], title: filename }); }
+      catch (e) { if (e.name !== 'AbortError') downloadMd(filename, content); }
+    } else { downloadMd(filename, content); }
+  }
+
+  function downloadMd(filename, content) {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([content], { type: 'text/markdown' }));
+    a.download = filename; a.click();
+    showToast('Downloaded!', 'success');
+  }
+
+  function exportToObsidian() {
+    if (isMobile) { exportToObsidianMobile('log'); }
+    else if ('showDirectoryPicker' in window) { exportToObsidianDesktop(); }
+    else { downloadMd(`${todayStr()}-daily-log.md`, generateDailyLog()); }
   }
 
   /* ════════════════════════════════════════
@@ -1807,16 +1840,48 @@ Reply with ONLY valid JSON (no markdown):
           </div>
 
           <div style={{ marginBottom: 20 }}>
-            <div style={{ fontSize: 10, color: '#4a6a7a', letterSpacing: 1, marginBottom: 8 }}>OBSIDIAN VAULT EXPORT</div>
-            <button onClick={exportToObsidian} style={{ width: '100%', padding: 13, borderRadius: 13, border: '1px solid rgba(168,85,247,0.4)', background: 'rgba(168,85,247,0.1)', color: '#A855F7', fontFamily: "'Oswald',sans-serif", fontSize: 14, fontWeight: 700, cursor: 'pointer' }}>
-              📁 EXPORT TO VAULT
-            </button>
-            <div style={{ fontSize: 10, color: '#555', marginTop: 5, textAlign: 'center' }}>Writes today's log + last workout as .md files</div>
+            <div style={{ fontSize: 10, color: '#4a6a7a', letterSpacing: 1, marginBottom: 8 }}>OBSIDIAN VAULT NAME (for phone export)</div>
+            <input value={sVaultName} onChange={e => setSVaultName(e.target.value)} placeholder="My Vault" style={inp} />
+            <div style={{ fontSize: 10, color: '#555', marginBottom: 12 }}>Exact name of your vault in Obsidian — needed for phone deep-link export</div>
+
+            {!isMobile ? (
+              /* Desktop: single button, picks folder directly */
+              <>
+                <button onClick={exportToObsidianDesktop} style={{ width: '100%', padding: 13, borderRadius: 13, border: '1px solid rgba(168,85,247,0.4)', background: 'rgba(168,85,247,0.1)', color: '#A855F7', fontFamily: "'Oswald',sans-serif", fontSize: 14, fontWeight: 700, cursor: 'pointer' }}>
+                  📁 PICK VAULT FOLDER &amp; EXPORT
+                </button>
+                <div style={{ fontSize: 10, color: '#555', marginTop: 5, textAlign: 'center' }}>Writes today's log + last workout directly into your vault</div>
+              </>
+            ) : (
+              /* Mobile: Obsidian URI + Share Sheet */
+              <>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
+                  <button onClick={() => exportToObsidianMobile('log')} style={{ padding: 12, borderRadius: 12, border: '1px solid rgba(168,85,247,0.4)', background: 'rgba(168,85,247,0.1)', color: '#A855F7', fontFamily: "'Oswald',sans-serif", fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
+                    📲 DAILY LOG<br/><span style={{ fontSize: 10, fontWeight: 400 }}>Open in Obsidian</span>
+                  </button>
+                  <button onClick={() => exportToObsidianMobile('workout')} style={{ padding: 12, borderRadius: 12, border: '1px solid rgba(168,85,247,0.4)', background: 'rgba(168,85,247,0.1)', color: '#A855F7', fontFamily: "'Oswald',sans-serif", fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
+                    📲 WORKOUT<br/><span style={{ fontSize: 10, fontWeight: 400 }}>Open in Obsidian</span>
+                  </button>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                  <button onClick={() => shareAsMdFile('log')} style={{ padding: 12, borderRadius: 12, border: '1px solid rgba(74,158,255,0.3)', background: 'rgba(74,158,255,0.08)', color: '#4A9EFF', fontFamily: "'Oswald',sans-serif", fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
+                    📤 SHARE LOG<br/><span style={{ fontSize: 10, fontWeight: 400 }}>Save to Files/iCloud</span>
+                  </button>
+                  <button onClick={() => shareAsMdFile('workout')} style={{ padding: 12, borderRadius: 12, border: '1px solid rgba(74,158,255,0.3)', background: 'rgba(74,158,255,0.08)', color: '#4A9EFF', fontFamily: "'Oswald',sans-serif", fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
+                    📤 SHARE WORKOUT<br/><span style={{ fontSize: 10, fontWeight: 400 }}>Save to Files/iCloud</span>
+                  </button>
+                </div>
+                <div style={{ fontSize: 10, color: '#555', marginTop: 6, textAlign: 'center' }}>
+                  "Open in Obsidian" creates the note instantly · "Share" saves to iCloud/Files for manual import
+                </div>
+              </>
+            )}
           </div>
 
           <button onClick={() => {
             setApiKey(sKey); setVercelUrl(sUrl);
             setWeekBudget(parseFloat(sBudget) || 150);
+            setVaultName(sVaultName);
             setShowSettings(false); showToast('Settings saved ✓', 'success');
           }} style={{ width: '100%', padding: 15, borderRadius: 14, border: 'none', background: '#4BDE80', color: '#000', fontFamily: "'Oswald',sans-serif", fontSize: 18, fontWeight: 700, cursor: 'pointer', letterSpacing: 0.5, marginBottom: 10 }}>
             SAVE SETTINGS
@@ -1824,7 +1889,7 @@ Reply with ONLY valid JSON (no markdown):
 
           <button onClick={() => {
             // Save first so sync link has latest values
-            setApiKey(sKey); setVercelUrl(sUrl); setWeekBudget(parseFloat(sBudget) || 150);
+            setApiKey(sKey); setVercelUrl(sUrl); setWeekBudget(parseFloat(sBudget) || 150); setVaultName(sVaultName);
             setTimeout(generateSyncLink, 50);
           }} style={{ width: '100%', padding: 13, borderRadius: 14, border: '1px solid rgba(74,158,255,0.35)', background: 'rgba(74,158,255,0.08)', color: '#4A9EFF', fontFamily: "'Oswald',sans-serif", fontSize: 15, fontWeight: 700, cursor: 'pointer', letterSpacing: 0.5 }}>
             📱 COPY SYNC LINK (FOR OTHER DEVICES)
