@@ -899,19 +899,43 @@ function FitnessHub() {
       method: 'POST',
       headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
       body: JSON.stringify({
-        model: 'claude-haiku-4-5',
-        max_tokens: 900,
-        messages: [{ role: 'user', content: `Create a fitness-optimized recipe for: "${query}".
-User goal: ${goal.label} (${goal.protein}g protein, ${goal.cal} cal/day).
-Reply with ONLY valid JSON (no markdown):
-{"name":"...","ingredients":[{"name":"...","amount":"..."}],"instructions":"Step 1: ... Step 2: ...","calories":000,"protein":00,"carbs":00,"fat":00,"baseServings":2,"macroTip":"..."}` }]
+        model: 'claude-sonnet-4-5',
+        max_tokens: 4000,
+        messages: [{ role: 'user', content: `You are a professional fitness chef. Create 3 DISTINCT high-protein variations of "${query}" for a ${goal.label} goal (${goal.protein}g protein target, ${goal.cal} cal/day). Each recipe must use ONLY ingredients available at Walmart.
+
+Rules:
+- Each variation must be genuinely different (different protein source, cooking method, or flavor profile)
+- Write REAL, detailed cooking instructions — include exact temperatures (°F), cook times, pan sizes, visual cues ("cook until golden brown"), and technique tips
+- Use realistic Walmart ingredient names and exact amounts (cups, oz, tbsp, etc.)
+- Macros must be accurate per serving
+
+Reply with ONLY a valid JSON array, no markdown, no explanation:
+[
+  {
+    "name": "specific descriptive name",
+    "ingredients": [{"name": "Great Value Chicken Breast", "amount": "1 lb"}, ...],
+    "instructions": "1. Preheat oven to 375°F. Pat chicken dry with paper towels...\\n2. In a large bowl, combine...\\n3. Heat a 12-inch oven-safe skillet over medium-high heat...",
+    "calories": 420,
+    "protein": 45,
+    "carbs": 38,
+    "fat": 9,
+    "baseServings": 2,
+    "prepTime": "10 min",
+    "cookTime": "25 min",
+    "macroTip": "specific tip about the protein/macro strategy"
+  },
+  { ... second variation ... },
+  { ... third variation ... }
+]` }]
       })
     });
     const data = await resp.json();
     const text = data.content?.[0]?.text || '';
     try {
-      const recipe = JSON.parse(text.replace(/```json?|```/g, '').trim());
-      return { ...recipe, id: 'ai_' + Date.now(), source: 'claude', image: null, category: 'AI Generated', area: '' };
+      const recipes = JSON.parse(text.replace(/```json?|```/g, '').trim());
+      return Array.isArray(recipes)
+        ? recipes.map((r, i) => ({ ...r, id: 'ai_' + Date.now() + i, source: 'claude', image: null, category: '🤖 AI Recipe', area: 'Walmart-Ready' }))
+        : [{ ...recipes, id: 'ai_' + Date.now(), source: 'claude', image: null, category: '🤖 AI Recipe', area: 'Walmart-Ready' }];
     } catch { return null; }
   }
 
@@ -936,17 +960,19 @@ Reply with ONLY valid JSON (no markdown):
       if (meals.length) {
         setOnlineResults(meals);
       } else if (apiKey) {
-        // Try 4: Claude web-search agent builds a real recipe
-        showToast('🔍 AI searching the web for a recipe…', 'info');
-        const webRecipe = await buildRecipeFromWebSearch(searchQ);
-        if (webRecipe) {
-          setOnlineResults([webRecipe]);
-          showToast('🌐 Recipe found & built for you!', 'success');
+        // Try 4: Claude web-search agent finds & builds 3 real recipes
+        showToast('🔍 AI searching the web for recipes…', 'info');
+        const webRecipes = await buildRecipeFromWebSearch(searchQ);
+        if (webRecipes?.length) {
+          setOnlineResults(webRecipes);
+          showToast(`🌐 Found ${webRecipes.length} recipes!`, 'success');
         } else {
-          // Try 5: pure Claude generation fallback
-          const aiRecipe = await generateRecipeWithClaude(searchQ);
-          if (aiRecipe) { setOnlineResults([aiRecipe]); showToast('🤖 AI built a recipe for you!', 'info'); }
-          else showToast('Nothing found', 'error');
+          // Try 5: pure Claude generation — 3 distinct variations
+          const aiRecipes = await generateRecipeWithClaude(searchQ);
+          if (aiRecipes?.length) {
+            setOnlineResults(Array.isArray(aiRecipes) ? aiRecipes : [aiRecipes]);
+            showToast(`🤖 AI built ${Array.isArray(aiRecipes) ? aiRecipes.length : 1} recipes for you!`, 'info');
+          } else showToast('Nothing found', 'error');
         }
       } else {
         showToast('No results — add Claude API key in Settings for AI recipes', 'error');
@@ -955,7 +981,7 @@ Reply with ONLY valid JSON (no markdown):
     setSearching(false);
   }
 
-  /* sub-agent: uses Claude web_search to find a real recipe, then formats it */
+  /* sub-agent: uses Claude web_search to find real recipes, then builds 3 variations */
   async function buildRecipeFromWebSearch(query) {
     if (!apiKey) return null;
     const goal = GOAL_PRESETS[userGoal] || GOAL_PRESETS.recomp;
@@ -967,19 +993,23 @@ Reply with ONLY valid JSON (no markdown):
           'content-type': 'application/json', 'anthropic-beta': 'web-search-2025-03-05'
         },
         body: JSON.stringify({
-          model: 'claude-haiku-4-5-20251001',
-          max_tokens: 1200,
+          model: 'claude-sonnet-4-5',
+          max_tokens: 4000,
           tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: 3 }],
           messages: [{ role: 'user', content:
-            `Search for the best high-protein "${query}" recipe. Requirements: high protein, uses ingredients ONLY available at Walmart, optimized for ${goal.label} goal (target ~${goal.protein}g protein/serving). After searching, reply with ONLY valid JSON no markdown:\n{"name":"...","ingredients":[{"name":"walmart item","amount":"..."}],"instructions":"Step 1: ... Step 2: ...","calories":0,"protein":0,"carbs":0,"fat":0,"baseServings":2,"macroTip":"...","swapTips":["swap to boost protein","swap to cut calories"]}`
+            `Search the web for "${query}" recipes. Find 3 genuinely different high-protein versions (different ingredients, cooking methods, or flavor profiles). All ingredients must be available at Walmart. Optimize for ${goal.label} goal (~${goal.protein}g protein per serving, ~${goal.cal} cal/day budget).
+
+After searching, reply with ONLY a valid JSON array, no markdown:
+[{"name":"specific name","ingredients":[{"name":"Walmart product name","amount":"exact amount"}],"instructions":"1. Preheat oven to 375°F...\\n2. In a large skillet over medium-high heat...\\n3. Season with...","calories":0,"protein":0,"carbs":0,"fat":0,"baseServings":2,"prepTime":"X min","cookTime":"X min","macroTip":"..."},...]`
           }]
         })
       });
       const data = await resp.json();
       const textBlock = (data.content || []).find(b => b.type === 'text');
       if (!textBlock) return null;
-      const recipe = JSON.parse(textBlock.text.replace(/```json?|```/g, '').trim());
-      return { ...recipe, id: 'web_' + Date.now(), source: 'web', image: null, category: '🌐 Web Recipe', area: 'Walmart-Ready' };
+      const parsed = JSON.parse(textBlock.text.replace(/```json?|```/g, '').trim());
+      const arr = Array.isArray(parsed) ? parsed : [parsed];
+      return arr.map((r, i) => ({ ...r, id: 'web_' + Date.now() + i, source: 'web', image: null, category: '🌐 Web Recipe', area: 'Walmart-Ready' }));
     } catch { return null; }
   }
 
@@ -1484,23 +1514,47 @@ Reply with ONLY valid JSON (no markdown):
               <div style={{ marginBottom: 14 }}>
                 <div style={{ fontSize: 10, color: '#4a6a7a', letterSpacing: 1, marginBottom: 8 }}>INGREDIENTS</div>
                 {activeRecipe.ingredients.map((ing, i) => {
-                  const c = estimateIngredientCost(ing.item, ing.qty, ing.unit);
+                  // Support both {name,amount} (AI) and {item,qty,unit} (MDB) formats
+                  const label = ing.name
+                    ? `${ing.amount ? ing.amount + ' ' : ''}${ing.name}`
+                    : `${ing.qty || ''} ${ing.unit || ''} ${ing.item || ''}`.trim();
+                  const c = ing.name
+                    ? estimateIngredientCost(ing.name, 1, 'serving')
+                    : estimateIngredientCost(ing.item, ing.qty, ing.unit);
                   return (
                     <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '7px 0', borderBottom: '1px solid rgba(255,255,255,0.04)', fontSize: 13, color: '#ccc' }}>
-                      <span>{ing.qty} {ing.unit} {ing.item}</span>
-                      <span style={{ color: '#4BDE80', fontSize: 11 }}>${c.toFixed(2)}</span>
+                      <span>{label}</span>
+                      {c > 0 && <span style={{ color: '#4BDE80', fontSize: 11 }}>${c.toFixed(2)}</span>}
                     </div>
                   );
                 })}
               </div>
             )}
 
-            {activeRecipe.instructions && (
-              <div style={{ marginBottom: 14 }}>
-                <div style={{ fontSize: 10, color: '#4a6a7a', letterSpacing: 1, marginBottom: 8 }}>INSTRUCTIONS</div>
-                <div style={{ fontSize: 13, color: '#bbb', lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>{activeRecipe.instructions}</div>
-              </div>
-            )}
+            {activeRecipe.instructions && (() => {
+              // Split on newlines or "1. 2. 3." numbered patterns
+              const raw = activeRecipe.instructions;
+              const steps = raw.split(/\n+/).flatMap(line =>
+                line.split(/(?=\d+\.\s)/).map(s => s.trim())
+              ).filter(s => s.length > 2);
+              return (
+                <div style={{ marginBottom: 14 }}>
+                  <div style={{ fontSize: 10, color: '#4a6a7a', letterSpacing: 1, marginBottom: 10 }}>
+                    INSTRUCTIONS {(activeRecipe.prepTime || activeRecipe.cookTime) && <span style={{ color: '#555', fontWeight: 400, letterSpacing: 0 }}>· ⏱ {[activeRecipe.prepTime && `prep ${activeRecipe.prepTime}`, activeRecipe.cookTime && `cook ${activeRecipe.cookTime}`].filter(Boolean).join(' · ')}</span>}
+                  </div>
+                  {steps.map((step, i) => {
+                    const clean = step.replace(/^\d+\.\s*/, '');
+                    const stepNum = step.match(/^(\d+)\./)?.[1] || (i + 1);
+                    return (
+                      <div key={i} style={{ display: 'flex', gap: 12, marginBottom: 12, alignItems: 'flex-start' }}>
+                        <div style={{ width: 24, height: 24, borderRadius: '50%', background: 'rgba(74,158,255,0.15)', border: '1px solid rgba(74,158,255,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, color: '#4A9EFF', fontWeight: 700, flexShrink: 0, marginTop: 1 }}>{stepNum}</div>
+                        <div style={{ fontSize: 13, color: '#ccc', lineHeight: 1.6, flex: 1 }}>{clean}</div>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
 
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
               <button onClick={() => { addRecipeToLog(activeRecipe, 1); setScreen('log'); }} style={{ flex: 1, padding: 13, borderRadius: 13, border: 'none', background: '#4BDE80', color: '#000', fontFamily: "'Oswald',sans-serif", fontSize: 14, fontWeight: 700, cursor: 'pointer' }}>
@@ -1589,22 +1643,24 @@ Reply with ONLY valid JSON (no markdown):
             const cost = estimateRecipeCost(r);
             const isSaved = !!saved.find(s => s.id === r.id);
             return (
-              <div key={r.id} onClick={() => setActiveRecipe(r)} style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 16, padding: 14, marginBottom: 10, border: '1px solid rgba(255,255,255,0.06)', cursor: 'pointer' }}>
+              <div key={r.id} onClick={() => { setRecipeSwaps(null); setActiveRecipe(r); }} style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 16, padding: 14, marginBottom: 10, border: `1px solid ${r.source === 'web' ? 'rgba(74,158,255,0.15)' : r.source === 'claude' ? 'rgba(168,85,247,0.15)' : 'rgba(255,255,255,0.06)'}`, cursor: 'pointer' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 5 }}>
                   <div style={{ flex: 1 }}>
                     <div style={{ fontSize: 14, fontWeight: 600, color: '#fff', marginBottom: 2 }}>{r.name}</div>
-                    <div style={{ fontSize: 10, color: '#555' }}>{r.category}{r.area ? ` · ${r.area}` : ''}</div>
+                    <div style={{ fontSize: 10, color: '#555' }}>{r.category}{r.area ? ` · ${r.area}` : ''}{(r.prepTime || r.cookTime) ? ` · ⏱ ${[r.prepTime, r.cookTime].filter(Boolean).join(' + ')}` : ''}</div>
                   </div>
                   <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
                     <StarRating id={r.id} ratings={ratings} setRatings={setRatings} size={12} />
                     {isSaved && <span style={{ fontSize: 9, color: '#4BDE80', border: '1px solid rgba(75,222,128,0.3)', borderRadius: 4, padding: '1px 5px' }}>SAVED</span>}
                   </div>
                 </div>
+                {r.macroTip && <div style={{ fontSize: 11, color: '#888', fontStyle: 'italic', marginBottom: 5, lineHeight: 1.4 }}>💡 {r.macroTip}</div>}
                 <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
                   {r.calories > 0 && <span style={{ fontSize: 11, color: '#FF6B4A' }}>{r.calories} cal</span>}
-                  {r.protein > 0 && <span style={{ fontSize: 11, color: '#4A9EFF' }}>{r.protein}g P</span>}
+                  {r.protein > 0 && <span style={{ fontSize: 11, color: '#4A9EFF' }}>{r.protein}g protein</span>}
+                  {r.carbs > 0 && <span style={{ fontSize: 11, color: '#A855F7' }}>{r.carbs}g carbs</span>}
+                  {r.fat > 0 && <span style={{ fontSize: 11, color: '#F5C842' }}>{r.fat}g fat</span>}
                   {cost > 0 && <span style={{ fontSize: 11, color: '#4BDE80' }}>${cost.toFixed(2)}/srv</span>}
-                  {ratings[r.id] > 0 && <span style={{ fontSize: 11, color: '#F5C842' }}>{'★'.repeat(ratings[r.id])}</span>}
                 </div>
               </div>
             );
