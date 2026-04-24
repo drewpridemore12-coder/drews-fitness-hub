@@ -60,8 +60,13 @@ function estimateIngredientCost(item, qty, unit) {
 
 function estimateRecipeCost(recipe) {
   if (!recipe.ingredients) return 0;
-  const total = recipe.ingredients.reduce((s, i) =>
-    s + estimateIngredientCost(i.item, i.qty, i.unit), 0);
+  const total = recipe.ingredients.reduce((s, i) => {
+    // Handle both {name,amount} (AI recipes) and {item,qty,unit} (MealDB)
+    const item = i.item || i.name || '';
+    const qty  = i.qty  || parseFloat(i.amount) || 1;
+    const unit = i.unit || (i.amount ? (i.amount.match(/[a-zA-Z]+/)?.[0] || 'oz') : 'oz');
+    return s + estimateIngredientCost(item, qty, unit);
+  }, 0);
   return Math.round((total / (recipe.baseServings || 1)) * 100) / 100;
 }
 
