@@ -1137,6 +1137,31 @@ After searching, reply with ONLY a valid JSON array, no markdown:
     } catch { return null; }
   }
 
+  /* add walmart-swapped version of recipe to shopping list */
+  function addWalmartVersionToShopList(recipe, swaps) {
+    const ingredients = recipe.ingredients || [];
+    const newItems = ingredients.map((ing, idx) => {
+      const ingName = typeof ing === 'string' ? ing : (ing.name || ing.item || '');
+      const ingAmount = ing.amount || (ing.qty != null ? `${ing.qty} ${ing.unit || ''}`.trim() : '');
+      // Find a matching swap by checking if the original keyword appears in the ingredient name
+      const swapMatch = swaps.find(s => {
+        const orig = s.original.toLowerCase();
+        const name = ingName.toLowerCase();
+        return name.includes(orig) || orig.includes(name.split(' ').slice(0,2).join(' '));
+      });
+      if (swapMatch) {
+        const text = (ingAmount ? ingAmount + ' ' : '') + swapMatch.walmartProduct;
+        return { id: Date.now() + idx + Math.random(), text: text.trim(), estCost: estimateIngredientCost(swapMatch.walmartProduct, 1, 'oz'), checked: false, source: recipe.name + ' (Walmart swap)', isSwap: true };
+      }
+      const text = ingAmount ? `${ingAmount} ${ingName}` : ingName;
+      return { id: Date.now() + idx + Math.random(), text: text.trim(), estCost: estimateIngredientCost(ingName, 1, 'oz'), checked: false, source: recipe.name };
+    });
+    setShopList(p => [...p, ...newItems]);
+    const swapCount = newItems.filter(i => i.isSwap).length;
+    showToast(`Added ${newItems.length} items (${swapCount} Walmart swaps) to list! 🛒`, 'success');
+    setScreen('shop');
+  }
+
   /* protein swap suggestions for a recipe */
   async function getProteinSwaps(recipe) {
     if (!apiKey) { showToast('Add Claude API key in Settings ⚙️', 'error'); return; }
@@ -1150,7 +1175,7 @@ After searching, reply with ONLY a valid JSON array, no markdown:
           model: 'claude-haiku-4-5',
           max_tokens: 600,
           messages: [{ role: 'user', content:
-            `Recipe: "${recipe.name}"\nIngredients: ${ings}\nCurrent: ~${recipe.calories || '?'} cal, ~${recipe.protein || '?'}g protein.\nSuggest 4 specific swaps to boost protein and/or cut calories. Walmart-available items only.\nReply ONLY valid JSON array no markdown:\n[{"original":"item in recipe","swap":"replacement","walmartProduct":"exact product name","proteinChange":"+Xg or -Xg","calChange":"+X or -X","tip":"why it works"}]`
+            `Recipe: "${recipe.name}"\nIngredients: ${ings}\nCurrent: ~${recipe.calories || '?'} cal, ~${recipe.protein || '?'}g protein.\nSuggest 4 high-protein swaps using Walmart-available products. For walmartProduct use the FULL searchable product name exactly as it appears on Walmart.com (brand + size, e.g. "Great Value Fat-Free Shredded Mozzarella 8oz").\nReply ONLY valid JSON array, no markdown:\n[{"original":"exact ingredient from recipe","swap":"leaner/higher protein version","walmartProduct":"Brand Name Product Size","proteinChange":"+Xg or -Xg","calChange":"+X or -X","tip":"one sentence why"}]`
           }]
         })
       });
@@ -1767,6 +1792,10 @@ After searching, reply with ONLY a valid JSON array, no markdown:
                     {s.tip && <div style={{ fontSize: 11, color: '#666', marginTop: 2, fontStyle: 'italic' }}>{s.tip}</div>}
                   </div>
                 ))}
+                <button onClick={() => addWalmartVersionToShopList(activeRecipe, recipeSwaps)}
+                  style={{ width: '100%', marginTop: 6, padding: 12, borderRadius: 12, border: 'none', background: 'linear-gradient(135deg,#0071ce,#004c97)', color: '#fff', fontFamily: "'Oswald',sans-serif", fontSize: 14, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+                  <span>🛒</span> ADD WALMART VERSION TO SHOPPING LIST
+                </button>
               </div>
             )}
             <div style={{ height: 80 }} />
@@ -2014,7 +2043,11 @@ After searching, reply with ONLY a valid JSON array, no markdown:
                 <div style={{ width: 20, height: 20, borderRadius: 6, border: `2px solid ${item.checked ? '#4BDE80' : 'rgba(255,255,255,0.2)'}`, background: item.checked ? 'rgba(75,222,128,0.2)' : 'transparent', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, color: '#4BDE80' }}>
                   {item.checked ? '✓' : ''}
                 </div>
-                <div style={{ flex: 1, fontSize: 13, color: item.checked ? '#555' : '#ddd', textDecoration: item.checked ? 'line-through' : 'none' }}>{item.text}</div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13, color: item.checked ? '#555' : '#ddd', textDecoration: item.checked ? 'line-through' : 'none' }}>{item.text}</div>
+                  {item.isSwap && !item.checked && <div style={{ fontSize: 9, color: '#0071ce', letterSpacing: 0.5, marginTop: 1 }}>🔵 WALMART SWAP</div>}
+                  {item.source && <div style={{ fontSize: 9, color: '#333', marginTop: 1 }}>{item.source}</div>}
+                </div>
                 {item.estCost > 0 && <div style={{ fontSize: 11, color: '#4BDE80', flexShrink: 0 }}>${item.estCost.toFixed(2)}</div>}
                 <button onClick={e => { e.stopPropagation(); setShopList(p => p.filter(i => i.id !== item.id)); }} style={{ width: 20, height: 20, borderRadius: 5, border: 'none', background: 'rgba(255,255,255,0.05)', color: '#666', cursor: 'pointer', fontSize: 10, flexShrink: 0 }}>✕</button>
               </div>
@@ -2237,7 +2270,7 @@ After searching, reply with ONLY a valid JSON array, no markdown:
 
 /* ── SERVICE WORKER ── */
 if ('serviceWorker' in navigator) {
-  const sw = `const C='drews-hub-v8';self.addEventListener('install',e=>{e.waitUntil(caches.open(C).then(c=>c.addAll(['.'])));self.skipWaiting();});self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==C).map(k=>caches.delete(k)))));self.clients.claim();});self.addEventListener('fetch',e=>{if(e.request.method!=='GET')return;const u=e.request.url;if(u.includes('api.anthropic.com')||u.includes('openfoodfacts')||u.includes('themealdb')||u.includes('fonts.googleapis')||u.includes('cdnjs'))return;e.respondWith(caches.match(e.request).then(r=>r||fetch(e.request).then(res=>{if(res&&res.ok){const cl=res.clone();caches.open(C).then(c=>c.put(e.request,cl));}return res;})));});`;
+  const sw = `const C='drews-hub-v9';self.addEventListener('install',e=>{e.waitUntil(caches.open(C).then(c=>c.addAll(['.'])));self.skipWaiting();});self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==C).map(k=>caches.delete(k)))));self.clients.claim();});self.addEventListener('fetch',e=>{if(e.request.method!=='GET')return;const u=e.request.url;if(u.includes('api.anthropic.com')||u.includes('openfoodfacts')||u.includes('themealdb')||u.includes('fonts.googleapis')||u.includes('cdnjs'))return;e.respondWith(caches.match(e.request).then(r=>r||fetch(e.request).then(res=>{if(res&&res.ok){const cl=res.clone();caches.open(C).then(c=>c.put(e.request,cl));}return res;})));});`;
   try { navigator.serviceWorker.register(URL.createObjectURL(new Blob([sw], { type: 'application/javascript' }))).catch(() => {}); } catch {}
 }
 
