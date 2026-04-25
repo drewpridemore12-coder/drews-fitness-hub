@@ -540,6 +540,142 @@ const fmt      = n => (n == null ? '—' : Math.round(n));
 const dayLabel = d => { try { return new Date(d + 'T12:00').toLocaleDateString('en-US', {weekday:'short', month:'short', day:'numeric'}); } catch { return d; } };
 
 /* ══════════════════════════════════════════════════
+   TASTY SHREDS COOKBOOK — 130 HIGH-PROTEIN RECIPES
+══════════════════════════════════════════════════ */
+const TASTY_SHREDS_RECIPES = [
+  {id:"tastyshreds_1",name:"S.O.B. Breakfast Burrito",source:"Tasty Shreds",category:"Tasty Shreds",calories:373,protein:44,carbs:24,fat:11,baseServings:1,ingredients:[{name:"70g ground turkey sausage"},{name:"28g fat free cheddar cheese"},{name:"2 slices turkey bacon"},{name:"200g egg white"},{name:"Cholula hot sauce"},{name:"1 tbsp fresh jalapeños"},{name:"1 tbsp green bell pepper"},{name:"1 Carb Balance Tortilla"}]},
+  {id:"tastyshreds_2",name:"Breakfast Bagel Club",source:"Tasty Shreds",category:"Tasty Shreds",calories:461,protein:52,carbs:32,fat:14,baseServings:1,ingredients:[{name:"1 low cal bagel or english muffin"},{name:"28g fat free cheddar cheese"},{name:"1 velveeta slice"},{name:"20g avocado"},{name:"150g liquid egg whites"},{name:"3 slices canadian bacon"},{name:"2 slices turkey bacon"}]},
+  {id:"tastyshreds_3",name:"Hungry Man Waffle Plate",source:"Tasty Shreds",category:"Tasty Shreds",calories:455,protein:43,carbs:35,fat:16,baseServings:1,ingredients:[{name:"53g kodiak waffle mix"},{name:"100g egg white"},{name:"1 cup almond milk"},{name:"50g sugar free syrup"},{name:"2 turkey sausage patties"},{name:"spray butter (optional)"}]},
+  {id:"tastyshreds_4",name:"Kyle's Turkey Bacon Club",source:"Tasty Shreds",category:"Tasty Shreds",calories:475,protein:43,carbs:38,fat:17,baseServings:1,ingredients:[{name:"2 slices low cal bread"},{name:"1 slice reduced fat cheddar"},{name:"16 slices turkey pepperoni"},{name:"2 slices turkey bacon"},{name:"2oz. deli turkey"},{name:"85g nonfat greek yogurt"},{name:"1 tbsp ranch seasoning"},{name:"lettuce, tomato, pickles"}]},
+  {id:"tastyshreds_5",name:"Flat Bread Garlic Chicken Pizza",source:"Tasty Shreds",category:"Tasty Shreds",calories:425,protein:66,carbs:20,fat:9,baseServings:1,ingredients:[{name:"1 Joseph's lavash flat bread"},{name:"4oz. chicken breast"},{name:"56g fat free mozzarella"},{name:"63g pizza sauce"},{name:"16 slices turkey pepperoni"},{name:"Italian seasonings, garlic"}]},
+  {id:"tastyshreds_6",name:"Taco Tuesday Tacos",source:"Tasty Shreds",category:"Tasty Shreds",calories:521,protein:42,carbs:43,fat:20,baseServings:1,ingredients:[{name:"3 carb balance tortillas"},{name:"5oz. 96/4 beef"},{name:"28g fat-free shredded cheese"},{name:"50g chopped white onions"},{name:"25g green onions"},{name:"1 tsp hot sauce"},{name:"50g black beans"}]},
+  {id:"tastyshreds_7",name:"AM Meatzilla Burrito",source:"Tasty Shreds",category:"Tasty Shreds",calories:380,protein:52,carbs:20,fat:10,baseServings:1,ingredients:[{name:"1 Mission carb balance tortilla"},{name:"3 slices canadian bacon"},{name:"1 turkey sausage patty"},{name:"150g egg white"},{name:"28g reduced fat cheddar"}]},
+  {id:"tastyshreds_8",name:"In-N-Out Style Burger",source:"Tasty Shreds",category:"Tasty Shreds",calories:530,protein:57,carbs:37,fat:17,baseServings:1,ingredients:[{name:"93% lean beef, 4oz"},{name:"1 Velveeta slice"},{name:"1 cup shredded lettuce"},{name:"sliced tomato, white onion"},{name:"6 pepperoncinis"},{name:"1 tbsp light mayo"},{name:"1 tbsp ketchup, 1 tsp mustard"},{name:"1 keto hamburger bun"}]},
+  {id:"tastyshreds_9",name:"Buffalo J.M. Burger",source:"Tasty Shreds",category:"Tasty Shreds",calories:385,protein:54,carbs:22,fat:9,baseServings:1,ingredients:[{name:"6oz. buffalo ground beef"},{name:"2 slices turkey bacon"},{name:"1 keto hamburger bun"},{name:"fresh jalapeños, mushrooms"},{name:"1 tbsp light mayo"},{name:"1 tbsp sriracha"}]},
+  {id:"tastyshreds_10",name:"Chocolate PB Banana Shake",source:"Tasty Shreds",category:"Tasty Shreds",calories:361,protein:34,carbs:29,fat:12,baseServings:1,ingredients:[{name:"1 cup unsweetened almond milk"},{name:"1 scoop chocolate protein powder (40g)"},{name:"1 large banana"},{name:"1 scoop PB Fit peanut butter powder"},{name:"1/3 cup nonfat Greek yogurt"}]},
+  {id:"tastyshreds_11",name:"Flat Bread Pepperoni Pizza",source:"Tasty Shreds",category:"Tasty Shreds",calories:361,protein:34,carbs:29,fat:12,baseServings:1,ingredients:[{name:"1 Joseph's lavash flat bread"},{name:"60g turkey pepperoni"},{name:"56g reduced fat mozzarella"},{name:"63g pizza sauce"}]},
+  {id:"tastyshreds_12",name:"Classic Breakfast Burrito",source:"Tasty Shreds",category:"Tasty Shreds",calories:530,protein:61,carbs:36,fat:16,baseServings:1,ingredients:[{name:"150g egg whites"},{name:"2 slices turkey bacon"},{name:"1 turkey sausage patty"},{name:"56g fat-free cheddar"},{name:"5 tater tots"},{name:"1 Mission carb balance tortilla"}]},
+  {id:"tastyshreds_13",name:"Crispy Chicken Zinger Sandwich",source:"Tasty Shreds",category:"Tasty Shreds",calories:318,protein:42,carbs:20,fat:8,baseServings:1,ingredients:[{name:"5oz. chicken breast tenderloins"},{name:"1 keto bun"},{name:"50g panko breadcrumbs"},{name:"50g egg white"},{name:"1 tbsp light mayo"},{name:"15g ketchup, 1 tbsp sriracha"},{name:"1 tbsp vinegar, buffalo seasoning"}]},
+  {id:"tastyshreds_14",name:"Skinny Pizza Bagel",source:"Tasty Shreds",category:"Tasty Shreds",calories:380,protein:31,carbs:32,fat:14,baseServings:1,ingredients:[{name:"1 skinny/low-cal bagel"},{name:"50g pizza sauce"},{name:"28g reduced fat mozzarella"},{name:"30g turkey pepperoni"},{name:"fresh jalapeños"},{name:"everything bagel seasoning"}]},
+  {id:"tastyshreds_15",name:"Bacon Wrapped Chicken Dog",source:"Tasty Shreds",category:"Tasty Shreds",calories:486,protein:41,carbs:40,fat:18,baseServings:1,ingredients:[{name:"1 garlic chicken sausage link (85g)"},{name:"2 slices turkey bacon"},{name:"28g reduced fat mexican cheese"},{name:"1 keto hot dog bun"},{name:"1 tbsp nacho cheese"},{name:"30g BBQ sauce, jalapeños"}]},
+  {id:"tastyshreds_16",name:"Game Day Buffalo Nuggets Quesadilla",source:"Tasty Shreds",category:"Tasty Shreds",calories:450,protein:34,carbs:40,fat:17,baseServings:1,ingredients:[{name:"8 panko chicken nuggets"},{name:"28g fat-free cheddar"},{name:"1 low cal tortilla"},{name:"2 tbsp fat-free ranch"},{name:"2 tbsp Frank's buffalo sauce"},{name:"2 tbsp G. Hughes BBQ sauce"}]},
+  {id:"tastyshreds_17",name:"Chicken Bacon Gameday Roll-Ups",source:"Tasty Shreds",category:"Tasty Shreds",calories:617,protein:57,carbs:48,fat:22,baseServings:1,ingredients:[{name:"2 carb counter tortillas"},{name:"1 slice turkey bacon"},{name:"3 slices canadian bacon"},{name:"8 panko chicken nuggets"},{name:"70g plain nonfat Greek yogurt"},{name:"Mexican cheese blend"},{name:"ranch seasoning packet"}]},
+  {id:"tastyshreds_18",name:"Chicken Alfredo Garlic Fries",source:"Tasty Shreds",category:"Tasty Shreds",calories:436,protein:48,carbs:30,fat:14,baseServings:1,ingredients:[{name:"4oz. chicken breast"},{name:"84g Alexia seasoned fries"},{name:"120ml classico alfredo sauce"},{name:"28g fat-free cheddar"},{name:"2 tbsp garlic, 2 tbsp parsley"}]},
+  {id:"tastyshreds_19",name:"The Chillest Chili",source:"Tasty Shreds",category:"Tasty Shreds",calories:480,protein:43,carbs:39,fat:17,baseServings:1,ingredients:[{name:"17oz. 93/7 lean beef"},{name:"3 cans tricolor beans"},{name:"165g tomato paste (basil/garlic)"},{name:"1 cup chopped white onion"},{name:"4 tbsp chili powder, 2 tbsp garlic powder"},{name:"diced fresh jalapeño"},{name:"28g fat-free cheddar, Greek yogurt"}]},
+  {id:"tastyshreds_20",name:"2 EZ Buffalo Dip Sandwiches",source:"Tasty Shreds",category:"Tasty Shreds",calories:445,protein:71,carbs:20,fat:9,baseServings:1,ingredients:[{name:"12.3oz. kirkland canned chicken breast"},{name:"86g Frank's buffalo sauce"},{name:"2 tbsp nonfat Greek yogurt"},{name:"28g reduced fat mozzarella"},{name:"1 tsp blue cheese"},{name:"2 keto hamburger buns"}]},
+  {id:"tastyshreds_21",name:"Kyle's Big M Burger",source:"Tasty Shreds",category:"Tasty Shreds",calories:480,protein:43,carbs:39,fat:17,baseServings:1,ingredients:[{name:"7oz. 93% ground beef"},{name:"2 keto hamburger buns"},{name:"2 slices velveeta cheese"},{name:"2 tbsp light mayo"},{name:"1 tbsp mustard, 1 tbsp white vinegar"},{name:"diced onions, pickles, lettuce, tomato"}]},
+  {id:"tastyshreds_22",name:"Skinny Breakfast Skillet",source:"Tasty Shreds",category:"Tasty Shreds",calories:248,protein:43,carbs:10,fat:4,baseServings:1,ingredients:[{name:"300g liquid egg whites"},{name:"3 slices canadian bacon"},{name:"1 slice velveeta or reduced fat cheddar"},{name:"2 tbsp nonfat Greek yogurt"},{name:"green onions, jalapeños, diced tomato"}]},
+  {id:"tastyshreds_23",name:"Beef Stroganoff",source:"Tasty Shreds",category:"Tasty Shreds",calories:400,protein:46,carbs:27,fat:12,baseServings:1,ingredients:[{name:"5oz. Banza chickpea pasta"},{name:"20oz. 93/7 beef"},{name:"170g nonfat Greek yogurt"},{name:"1/2 cup flour"},{name:"4 tbsp Dijon mustard"},{name:"1/2 cup mushrooms, 1/2 cup sliced onions"},{name:"beef stock, salt, pepper, garlic"}]},
+  {id:"tastyshreds_24",name:"Anabolic Greek Gyro",source:"Tasty Shreds",category:"Tasty Shreds",calories:354,protein:43,carbs:23,fat:10,baseServings:1,ingredients:[{name:"5oz. deli roast beef"},{name:"1 low cal pita bread"},{name:"85g nonfat Greek yogurt (tzatziki)"},{name:"small cucumber, red onion, tomato"},{name:"feta cheese, lemon juice, garlic"}]},
+  {id:"tastyshreds_25",name:"Cheesesteak Sub",source:"Tasty Shreds",category:"Tasty Shreds",calories:354,protein:43,carbs:23,fat:10,baseServings:1,ingredients:[{name:"5oz. deli roast beef"},{name:"1 low cal hoagie roll"},{name:"white onions, green bell pepper"},{name:"red bell pepper"},{name:"1 tbsp fat-free mozzarella"},{name:"minced garlic"}]},
+  {id:"tastyshreds_26",name:"Protein Pizza",source:"Tasty Shreds",category:"Tasty Shreds",calories:410,protein:57,carbs:23,fat:10,baseServings:1,ingredients:[{name:"1 low cal tortilla"},{name:"150g liquid egg whites"},{name:"100g fat-free mozzarella"},{name:"56g turkey pepperoni"},{name:"5 slices canadian bacon"},{name:"pizza sauce, italian seasonings"}]},
+  {id:"tastyshreds_27",name:"Lean Machine Totchos",source:"Tasty Shreds",category:"Tasty Shreds",calories:464,protein:40,carbs:38,fat:17,baseServings:1,ingredients:[{name:"tater tots (air fried)"},{name:"5oz. 93/7 beef or ground turkey"},{name:"fat-free cheddar cheese"},{name:"nonfat Greek yogurt"},{name:"2 tbsp taco seasoning, 2 tbsp salsa"},{name:"jalapeño slices, green onions"}]},
+  {id:"tastyshreds_28",name:"Tasty Shredder Breakfast",source:"Tasty Shreds",category:"Tasty Shreds",calories:365,protein:51,carbs:20,fat:9,baseServings:1,ingredients:[{name:"5 slices canadian bacon"},{name:"1 kraft single"},{name:"150g egg whites"},{name:"1 large low cal tortilla"},{name:"28g fat free cheddar"},{name:"favorite veggies & seasonings"}]},
+  {id:"tastyshreds_29",name:"High Protein Berry Froyo",source:"Tasty Shreds",category:"Tasty Shreds",calories:282,protein:27,carbs:21,fat:10,baseServings:1,ingredients:[{name:"200g Oikos Triple Zero Greek yogurt"},{name:"63g frozen berry blend"},{name:"1 medium banana"},{name:"1/2 graham cracker"},{name:"8g PB Fit powder"}]},
+  {id:"tastyshreds_30",name:"Filthy Cheesesteak Pizza",source:"Tasty Shreds",category:"Tasty Shreds",calories:460,protein:60,carbs:28,fat:12,baseServings:1,ingredients:[{name:"1 Joseph's lavash flatbread"},{name:"5oz. roast beef"},{name:"56g fat-free mozzarella"},{name:"14g blue cheese crumbles"},{name:"26g nacho cheese"},{name:"50g nonfat Greek yogurt"},{name:"red bell pepper, white onion, garlic"}]},
+  {id:"tastyshreds_31",name:"The Beast Omelette",source:"Tasty Shreds",category:"Tasty Shreds",calories:346,protein:55,carbs:16,fat:7,baseServings:1,ingredients:[{name:"200g liquid egg whites"},{name:"50g fat-free cheddar"},{name:"3 slices canadian bacon"},{name:"85g southern style potatoes"},{name:"chili powder, salsa"},{name:"2 tbsp nonfat Greek yogurt"}]},
+  {id:"tastyshreds_32",name:"California King Burrito",source:"Tasty Shreds",category:"Tasty Shreds",calories:365,protein:51,carbs:20,fat:9,baseServings:1,ingredients:[{name:"5oz. carne asada"},{name:"40g fat-free mozzarella"},{name:"1 carb balance tortilla"},{name:"nonfat Greek yogurt"},{name:"40g guacamole"},{name:"pico de gallo, lime, cilantro"}]},
+  {id:"tastyshreds_33",name:"Creamy Turkey Rotini",source:"Tasty Shreds",category:"Tasty Shreds",calories:490,protein:41,carbs:41,fat:18,baseServings:1,ingredients:[{name:"2oz. Banza rotini"},{name:"100g Italian turkey sausage"},{name:"50g nonfat Greek yogurt"},{name:"35g 1/3 less fat cream cheese"},{name:"28g fat-free mozzarella"},{name:"87g marinara sauce, cherry tomatoes"},{name:"minced garlic, parsley"}]},
+  {id:"tastyshreds_34",name:"Tyson Buffalo Chicken Sandwiches",source:"Tasty Shreds",category:"Tasty Shreds",calories:580,protein:54,carbs:46,fat:20,baseServings:1,ingredients:[{name:"2 Tyson panko chicken breasts"},{name:"2 keto hamburger buns"},{name:"24g 1/3 less fat cream cheese"},{name:"5 tbsp Frank's buffalo sauce"},{name:"pickles, coleslaw, peppers"}]},
+  {id:"tastyshreds_35",name:"Quest Power Nachos",source:"Tasty Shreds",category:"Tasty Shreds",calories:490,protein:41,carbs:41,fat:18,baseServings:1,ingredients:[{name:"Quest protein chips"},{name:"5oz. 93/7 beef or chicken"},{name:"fat-free cheddar"},{name:"nonfat Greek yogurt"},{name:"2 tbsp taco seasoning, jalapeños, green onions"}]},
+  {id:"tastyshreds_36",name:"Not a Chevy Breakfast Sandwich",source:"Tasty Shreds",category:"Tasty Shreds",calories:354,protein:42,carbs:24,fat:10,baseServings:1,ingredients:[{name:"1 keto bun or low cal bread"},{name:"100g egg whites"},{name:"2 slices center cut bacon"},{name:"1 turkey sausage patty"},{name:"2 slices velveeta"},{name:"spray butter"}]},
+  {id:"tastyshreds_37",name:"D.B.T.R. Chicken Turkey Club",source:"Tasty Shreds",category:"Tasty Shreds",calories:451,protein:51,carbs:30,fat:14,baseServings:1,ingredients:[{name:"5oz. grilled chicken breast"},{name:"2oz. deli turkey"},{name:"60g fat free mozzarella"},{name:"shredded lettuce, jalapeño"},{name:"1 tbsp light mayo"},{name:"2 tbsp southwest mustard"}]},
+  {id:"tastyshreds_38",name:"Loaded Enchilada Fries",source:"Tasty Shreds",category:"Tasty Shreds",calories:494,protein:57,carbs:33,fat:15,baseServings:1,ingredients:[{name:"5oz. chicken breast"},{name:"great value seasoned fries"},{name:"1/2 cup red enchilada sauce"},{name:"1/2 cup fat-free mozzarella"},{name:"40g nacho cheese sauce"},{name:"35g nonfat Greek yogurt"}]},
+  {id:"tastyshreds_39",name:"Waffle Iron Wrap",source:"Tasty Shreds",category:"Tasty Shreds",calories:357,protein:51,carbs:20,fat:8,baseServings:1,ingredients:[{name:"1 xtreme wellness wrap"},{name:"150g egg white"},{name:"3 slices turkey bacon"},{name:"48g fat free mozzarella"},{name:"35g nonfat Greek yogurt"},{name:"hot sauce, cilantro, jalapeño, pico"}]},
+  {id:"tastyshreds_40",name:"Low Cal Turkey Panini",source:"Tasty Shreds",category:"Tasty Shreds",calories:301,protein:38,carbs:19,fat:8,baseServings:1,ingredients:[{name:"2 slices keto white bread"},{name:"112g turkey breast deli"},{name:"28g fat free mozzarella"},{name:"1 velveeta slice"},{name:"shredded lettuce, tomato"},{name:"southwest mustard"}]},
+  {id:"tastyshreds_41",name:"BIG MAD Quesadilla",source:"Tasty Shreds",category:"Tasty Shreds",calories:543,protein:65,carbs:35,fat:16,baseServings:1,ingredients:[{name:"1 low cal tortilla"},{name:"5oz. 93/7 beef"},{name:"56g fat free cheddar"},{name:"1 slice turkey bacon"},{name:"1 slice velveeta"},{name:"2 tbsp light mayo, 15g ketchup"},{name:"romaine lettuce, pickles"}]},
+  {id:"tastyshreds_42",name:"Creamy Chicken Bacon Pasta",source:"Tasty Shreds",category:"Tasty Shreds",calories:634,protein:64,carbs:47,fat:21,baseServings:1,ingredients:[{name:"2oz. barilla protein pasta"},{name:"3oz. chicken breast"},{name:"2 slices turkey bacon"},{name:"56g fat free cheddar"},{name:"100ml almond milk"},{name:"50g fat free cream cheese"},{name:"1 tbsp minced garlic, ranch seasoning"}]},
+  {id:"tastyshreds_43",name:"Creamy Chicken Alfredo",source:"Tasty Shreds",category:"Tasty Shreds",calories:634,protein:64,carbs:47,fat:21,baseServings:1,ingredients:[{name:"2oz. Barilla protein penne"},{name:"4oz. chicken breast"},{name:"28g reduced fat mozzarella"},{name:"1/3 cup classico four cheese alfredo"},{name:"60g nonfat Greek yogurt"},{name:"black truffle parmesan, garlic, parsley"}]},
+  {id:"tastyshreds_44",name:"Mother Fepping Protein Nuggets",source:"Tasty Shreds",category:"Tasty Shreds",calories:492,protein:75,carbs:23,fat:11,baseServings:1,ingredients:[{name:"8oz. 96/4 ground chicken"},{name:"15g panko breadcrumbs"},{name:"70g nonfat Greek yogurt"},{name:"56g fat-free cheddar"},{name:"22g egg whites"},{name:"ranch seasoning, paprika, garlic"}]},
+  {id:"tastyshreds_45",name:"Chicken Ranch PITA",source:"Tasty Shreds",category:"Tasty Shreds",calories:281,protein:50,carbs:11,fat:4,baseServings:1,ingredients:[{name:"5.2oz. chicken breast"},{name:"1/2 Joseph's pita bread"},{name:"52g nonfat Greek yogurt"},{name:"2 tbsp hidden valley ranch seasoning"},{name:"green onions"}]},
+  {id:"tastyshreds_46",name:"Tasty Swole Burrito",source:"Tasty Shreds",category:"Tasty Shreds",calories:360,protein:50,carbs:20,fat:9,baseServings:1,ingredients:[{name:"4oz. 93/7 beef"},{name:"28g fat-free mozzarella"},{name:"14g reduced fat mexican cheese"},{name:"43g nonfat Greek yogurt"},{name:"1 tbsp nacho cheese"},{name:"1 large xtreme wellness wrap"}]},
+  {id:"tastyshreds_47",name:"Spicy CFA-Style Nuggets",source:"Tasty Shreds",category:"Tasty Shreds",calories:345,protein:48,carbs:20,fat:8,baseServings:1,ingredients:[{name:"8oz. 96/4 ground chicken"},{name:"14g panko breadcrumbs"},{name:"20g egg white"},{name:"2 tbsp Thai chili sauce (G. Hughes)"},{name:"1 diced jalapeño, green onion"},{name:"garlic salt, paprika"}]},
+  {id:"tastyshreds_48",name:"Jalapeño Popper Tacos",source:"Tasty Shreds",category:"Tasty Shreds",calories:590,protein:66,carbs:41,fat:18,baseServings:1,ingredients:[{name:"3 carb counter tortillas"},{name:"4oz. 93/7 beef"},{name:"2 large eggs"},{name:"14g reduced fat mexican cheese"},{name:"28g fat-free mozzarella"},{name:"35g nonfat Greek yogurt"},{name:"9g 1/3 less fat cream cheese"},{name:"1 tbsp nacho cheese"}]},
+  {id:"tastyshreds_49",name:"Arnold's Bicep Burrito",source:"Tasty Shreds",category:"Tasty Shreds",calories:559,protein:99,carbs:20,fat:9,baseServings:1,ingredients:[{name:"2 large xtreme wellness wraps"},{name:"8.4oz. chicken tenderloins"},{name:"56g fat-free cheddar"},{name:"2 tbsp fat-free sour cream"},{name:"30g red enchilada sauce"},{name:"120g nonfat Greek yogurt"},{name:"jalapeño, 1-2 chipotle peppers"}]},
+  {id:"tastyshreds_50",name:"Pizza Pocket",source:"Tasty Shreds",category:"Tasty Shreds",calories:273,protein:32,carbs:18,fat:8,baseServings:1,ingredients:[{name:"1 xtreme wellness wrap"},{name:"17 slices turkey pepperoni"},{name:"2oz. smoked turkey breast"},{name:"1/3 cup velveeta shreds"},{name:"1/4 cup pizza sauce"},{name:"garlic salt, parmesan"}]},
+  {id:"tastyshreds_51",name:"Bro Back Mountain Grilled Chicken Sandwich",source:"Tasty Shreds",category:"Tasty Shreds",calories:432,protein:59,carbs:24,fat:11,baseServings:1,ingredients:[{name:"5oz. chicken breast"},{name:"2 slices turkey bacon"},{name:"1 keto hamburger bun"},{name:"1 tbsp light mayo"},{name:"1 tbsp spicy BBQ sauce"},{name:"jalapeño, fried onion, mustard"}]},
+  {id:"tastyshreds_52",name:"Creamy Chipotle Steak Fries",source:"Tasty Shreds",category:"Tasty Shreds",calories:519,protein:51,carbs:38,fat:18,baseServings:1,ingredients:[{name:"4.5oz. top sirloin steak"},{name:"100g seasoned shoestring fries"},{name:"56g fat-free cheddar"},{name:"50g nonfat Greek yogurt"},{name:"chipotle cream sauce, pico de gallo"},{name:"hot sauce (roja)"}]},
+  {id:"tastyshreds_53",name:"K.M. Breakfast Taco",source:"Tasty Shreds",category:"Tasty Shreds",calories:533,protein:59,carbs:38,fat:16,baseServings:1,ingredients:[{name:"2 slices turkey bacon"},{name:"2oz. turkey chorizo"},{name:"ore-ida extra crispy fries"},{name:"148g liquid egg whites"},{name:"low cal tortillas"}]},
+  {id:"tastyshreds_54",name:"Chipotle Chicken Mac N Cheese",source:"Tasty Shreds",category:"Tasty Shreds",calories:525,protein:52,carbs:39,fat:18,baseServings:1,ingredients:[{name:"2oz. Banza chickpea rotini"},{name:"1 grilled chicken patty (99g)"},{name:"55g premium cheddar sauce"},{name:"1/3 cup velveeta shreds"},{name:"65g nonfat Greek yogurt"},{name:"79g fat-free cottage cheese"},{name:"8g chipotle peppers, green onions"}]},
+  {id:"tastyshreds_55",name:"Arnold's Tricep Burrito",source:"Tasty Shreds",category:"Tasty Shreds",calories:688,protein:101,carbs:35,fat:16,baseServings:1,ingredients:[{name:"6oz. lean ground beef"},{name:"2 large xtreme wellness wraps"},{name:"150g nonfat Greek yogurt"},{name:"2 slices turkey bacon"},{name:"70g fat-free cheddar"},{name:"bell peppers, taco seasoning"}]},
+  {id:"tastyshreds_56",name:"Pizza Pasta",source:"Tasty Shreds",category:"Tasty Shreds",calories:478,protein:53,carbs:33,fat:15,baseServings:1,ingredients:[{name:"2oz. Barilla protein pasta"},{name:"5oz. chicken breast or ground turkey"},{name:"36g cheddar sauce"},{name:"28g fat-free cheddar"},{name:"turkey pepperoni, pizza sauce"},{name:"pork panko 7g"}]},
+  {id:"tastyshreds_57",name:"Cutler's Calves Breakfast Burrito",source:"Tasty Shreds",category:"Tasty Shreds",calories:667,protein:95,carbs:36,fat:16,baseServings:1,ingredients:[{name:"200g liquid egg whites + 1 egg"},{name:"3oz. oven roasted turkey breast"},{name:"60g fat-free cheddar"},{name:"2 slices turkey bacon"},{name:"2 large xtreme wellness wraps"},{name:"1 tbsp guacamole"},{name:"17g nonfat Greek yogurt"}]},
+  {id:"tastyshreds_58",name:"Strawberry Protein Milkshake",source:"Tasty Shreds",category:"Tasty Shreds",calories:228,protein:33,carbs:13,fat:5,baseServings:1,ingredients:[{name:"1.5 scoops whey protein (vanilla)"},{name:"20ml almond milk"},{name:"100g organic Greek yogurt"},{name:"4 medium strawberries"},{name:"1/2 tsp xanthan gum"},{name:"3 tsp brown sugar replacement"},{name:"10g whipped topping"}]},
+  {id:"tastyshreds_59",name:"Snoop Dog Chicken Sausage",source:"Tasty Shreds",category:"Tasty Shreds",calories:228,protein:33,carbs:13,fat:5,baseServings:1,ingredients:[{name:"4oz. 96/4 ground chicken (formed as dog)"},{name:"1 keto hot dog bun"},{name:"1 tsp horseradish mustard"},{name:"sundried tomato, roasted jalapeño"},{name:"2 tbsp sauerkraut"}]},
+  {id:"tastyshreds_60",name:"Sonic Chili Cheese Dog",source:"Tasty Shreds",category:"Tasty Shreds",calories:377,protein:53,carbs:21,fat:9,baseServings:1,ingredients:[{name:"4oz. 96/4 ground chicken dog"},{name:"1 keto hot dog bun"},{name:"30g fat-free mozzarella"},{name:"50g canned chili (no beans)"},{name:"1 tbsp nacho cheese"},{name:"30g nonfat Greek yogurt"},{name:"chopped white onion, turkey bacon"}]},
+  {id:"tastyshreds_61",name:"White Hot Ranch Barbacoa Fries",source:"Tasty Shreds",category:"Tasty Shreds",calories:543,protein:54,carbs:41,fat:18,baseServings:1,ingredients:[{name:"5oz. Del Real barbacoa"},{name:"130g seasoned french fries"},{name:"56g fat-free mozzarella"},{name:"14g pepper jack cheese"},{name:"85g nonfat Greek yogurt (ranch)"},{name:"pickled jalapeños"}]},
+  {id:"tastyshreds_62",name:"Dill Pickle Smash Burger",source:"Tasty Shreds",category:"Tasty Shreds",calories:377,protein:53,carbs:21,fat:9,baseServings:1,ingredients:[{name:"7oz. 93/7 beef"},{name:"1 keto hamburger bun"},{name:"0.5oz. pork panko"},{name:"3 dill pickle slices"},{name:"2 slices turkey bacon"},{name:"1 velveeta slice"},{name:"40g nonfat Greek yogurt"}]},
+  {id:"tastyshreds_63",name:"Creamy Cheesy Barbacoa Burrito",source:"Tasty Shreds",category:"Tasty Shreds",calories:374,protein:60,carbs:18,fat:7,baseServings:1,ingredients:[{name:"5oz. Del Real barbacoa"},{name:"1 xtreme wellness wrap"},{name:"56g fat-free mozzarella"},{name:"14g pepper jack cheese"},{name:"100g nonfat Greek yogurt"}]},
+  {id:"tastyshreds_64",name:"Mac N Cheese Pizza",source:"Tasty Shreds",category:"Tasty Shreds",calories:418,protein:49,carbs:28,fat:12,baseServings:1,ingredients:[{name:"56g Banza macaroni elbows"},{name:"113g fat-free cottage cheese"},{name:"60g fat-free mozzarella"},{name:"6 slices turkey pepperoni"},{name:"2-4 tbsp almond milk, garlic"}]},
+  {id:"tastyshreds_65",name:"Creamy Chipotle Chicken Burrito",source:"Tasty Shreds",category:"Tasty Shreds",calories:399,protein:55,carbs:22,fat:10,baseServings:1,ingredients:[{name:"6oz. Tyson chicken breast"},{name:"1 carb balance tortilla"},{name:"30g fat-free cheddar"},{name:"80g nonfat Greek yogurt"},{name:"50g chipotle cream sauce"},{name:"1 tbsp guacamole, pico de gallo"}]},
+  {id:"tastyshreds_66",name:"Pollo Asado Meal Prep",source:"Tasty Shreds",category:"Tasty Shreds",calories:653,protein:128,carbs:17,fat:8,baseServings:4,ingredients:[{name:"22oz. chicken breast"},{name:"1 tsp each: cumin, chipotle seasoning, oregano"},{name:"4 tbsp cilantro"},{name:"1 tbsp garlic salt"},{name:"2 tbsp white vinegar"},{name:"1 poblano pepper"}]},
+  {id:"tastyshreds_67",name:"Animal Fry Meal Prep",source:"Tasty Shreds",category:"Tasty Shreds",calories:728,protein:140,carbs:22,fat:9,baseServings:4,ingredients:[{name:"340g shoestring french fries"},{name:"20oz. 93/7 beef"},{name:"4 velveeta slices"},{name:"4.5 tbsp light mayo"},{name:"6 tbsp ketchup, 4 tbsp relish"},{name:"1/2 white onion, vinegar"}]},
+  {id:"tastyshreds_68",name:"Brookie Monster Dessert",source:"Tasty Shreds",category:"Tasty Shreds",calories:843,protein:83,carbs:65,fat:28,baseServings:1,ingredients:[{name:"0.5 scoop chocolate whey protein"},{name:"0.5 scoop vanilla whey protein"},{name:"70g PB Fit powder"},{name:"0.5 banana"},{name:"10g unsweetened cocoa powder"},{name:"20ml almond milk"},{name:"20g brown sugar replacement"},{name:"2 tbsp coconut flour"}]},
+  {id:"tastyshreds_69",name:"Oreo Protein Shake",source:"Tasty Shreds",category:"Tasty Shreds",calories:275,protein:32,carbs:19,fat:8,baseServings:1,ingredients:[{name:"1 scoop vanilla whey protein"},{name:"100g nonfat Greek yogurt"},{name:"20g brown sugar replacement"},{name:"1 tbsp cocoa powder"},{name:"1/2 tsp xanthan gum"},{name:"5 tbsp fat-free whipping cream"},{name:"2 tbsp oreo pieces, almond milk"}]},
+  {id:"tastyshreds_70",name:"Carnitas Street Taco Pizza",source:"Tasty Shreds",category:"Tasty Shreds",calories:554,protein:58,carbs:40,fat:18,baseServings:1,ingredients:[{name:"3oz. carnitas"},{name:"1 xtreme wellness wrap"},{name:"56g fat-free mozzarella"},{name:"30g reduced fat monterey jack"},{name:"radish slices, cilantro, lime"}]},
+  {id:"tastyshreds_71",name:"Animal Style Smash Burger",source:"Tasty Shreds",category:"Tasty Shreds",calories:334,protein:36,carbs:23,fat:11,baseServings:1,ingredients:[{name:"4.5oz. 93/7 beef"},{name:"1 velveeta slice"},{name:"1 keto bun"},{name:"2 tbsp light mayo"},{name:"1/2 tbsp ketchup"},{name:"mustard, white onion, relish, vinegar"}]},
+  {id:"tastyshreds_72",name:"Blazing Turkey Gobbler",source:"Tasty Shreds",category:"Tasty Shreds",calories:340,protein:36,carbs:24,fat:11,baseServings:1,ingredients:[{name:"2 slices keto wheat bread"},{name:"2 slices uncured turkey bacon"},{name:"1 velveeta slice"},{name:"28g reduced fat mozzarella"},{name:"28g fat-free cheddar"},{name:"white onion, jalapeño"}]},
+  {id:"tastyshreds_73",name:"Pizza Quesadilla",source:"Tasty Shreds",category:"Tasty Shreds",calories:487,protein:56,carbs:32,fat:15,baseServings:1,ingredients:[{name:"1 carb balance tortilla"},{name:"5 slices canadian bacon"},{name:"12 slices turkey pepperoni"},{name:"56g fat-free mozzarella"},{name:"28g reduced fat mozzarella"},{name:"112g fat-free cottage cheese"},{name:"30g pizza sauce"}]},
+  {id:"tastyshreds_74",name:"Bacon N Egg Bagel Sandwich",source:"Tasty Shreds",category:"Tasty Shreds",calories:278,protein:27,carbs:22,fat:9,baseServings:1,ingredients:[{name:"1 skinny bagel"},{name:"50g egg whites"},{name:"2 slices turkey bacon"},{name:"1 velveeta slice"}]},
+  {id:"tastyshreds_75",name:"Creamy Buffalo Grilled Cheese",source:"Tasty Shreds",category:"Tasty Shreds",calories:426,protein:43,carbs:32,fat:14,baseServings:1,ingredients:[{name:"2 slices keto bread"},{name:"4oz. chicken thigh (cooked)"},{name:"60g 1/3 less fat cream cheese"},{name:"3 tbsp Frank's buffalo sauce"},{name:"100g reduced fat cheddar"},{name:"4 slices provolone"}]},
+  {id:"tastyshreds_76",name:"Animal Fry Burrito",source:"Tasty Shreds",category:"Tasty Shreds",calories:431,protein:47,carbs:29,fat:14,baseServings:1,ingredients:[{name:"6oz. 93/7 beef"},{name:"1 xtreme wellness wrap"},{name:"1 velveeta slice"},{name:"90g shoestring fries"},{name:"1/4 white onion, chopped"},{name:"animal sauce: light mayo, ketchup, relish, mustard"}]},
+  {id:"tastyshreds_77",name:"Pinwheel Pizza",source:"Tasty Shreds",category:"Tasty Shreds",calories:845,protein:101,carbs:56,fat:24,baseServings:2,ingredients:[{name:"2 Joseph's lavash flatbreads"},{name:"84g fat-free mozzarella"},{name:"40g reduced fat mozzarella"},{name:"40 slices turkey pepperoni"},{name:"84g canadian bacon"},{name:"3/4 cup pizza sauce"}]},
+  {id:"tastyshreds_78",name:"Pizza Pocket Burrito",source:"Tasty Shreds",category:"Tasty Shreds",calories:414,protein:52,carbs:27,fat:11,baseServings:1,ingredients:[{name:"4oz. 95% fat-free mini club ham"},{name:"120g pizza sauce"},{name:"120g reduced fat mozzarella"},{name:"30 slices turkey pepperoni"},{name:"3 laughing cow cheese wedges"},{name:"1 xtreme wellness wrap"}]},
+  {id:"tastyshreds_79",name:"Pretzel Bites with Beer Cheese",source:"Tasty Shreds",category:"Tasty Shreds",calories:479,protein:26,carbs:46,fat:21,baseServings:1,ingredients:[{name:"1 cup self-rising flour"},{name:"150g nonfat Greek yogurt"},{name:"113g fat-free cottage cheese"},{name:"30g reduced fat cheddar"},{name:"1 oz. light beer"},{name:"1 tbsp beer mustard"},{name:"4 tbsp queso blanco dip"}]},
+  {id:"tastyshreds_80",name:"Creamy Chicken Pesto Pasta",source:"Tasty Shreds",category:"Tasty Shreds",calories:441,protein:36,carbs:38,fat:16,baseServings:1,ingredients:[{name:"8oz. Barilla protein pasta"},{name:"16oz. basil chicken thigh"},{name:"60g pesto"},{name:"200g fat-free cottage cheese"},{name:"2 tbsp basil paste"},{name:"salt, pepper, garlic, basil"}]},
+  {id:"tastyshreds_81",name:"Anabolic Orange Chicken",source:"Tasty Shreds",category:"Tasty Shreds",calories:560,protein:53,carbs:44,fat:19,baseServings:1,ingredients:[{name:"6oz. chicken breast"},{name:"1 package jasmine rice"},{name:"2 tbsp cornstarch"},{name:"4 tbsp sugar-free orange ginger marinade"}]},
+  {id:"tastyshreds_82",name:"Creamy Alfredo Meatball Spaghetti",source:"Tasty Shreds",category:"Tasty Shreds",calories:475,protein:64,carbs:28,fat:12,baseServings:1,ingredients:[{name:"2 servings hearts of palm linguine"},{name:"16oz. 96/4 ground chicken (meatballs)"},{name:"fat-free mozzarella"},{name:"fat-free cottage cheese"},{name:"classico alfredo sauce"},{name:"garlic, Italian seasoning"}]},
+  {id:"tastyshreds_83",name:"Poor Boy McMuffins",source:"Tasty Shreds",category:"Tasty Shreds",calories:237,protein:32,carbs:14,fat:6,baseServings:1,ingredients:[{name:"15oz. chicken sausage (formed)"},{name:"300g egg whites"},{name:"75g reduced fat cheddar"},{name:"6 reduced fat provolone slices"},{name:"6 keto english muffins"},{name:"sage, salt, pepper, Italian seasoning"}]},
+  {id:"tastyshreds_84",name:"Arugula Chicken Pesto Mac",source:"Tasty Shreds",category:"Tasty Shreds",calories:400,protein:47,carbs:26,fat:12,baseServings:1,ingredients:[{name:"16oz. chicken breast"},{name:"8oz. Barilla protein pasta"},{name:"226g fat-free cottage cheese"},{name:"40g 1/3 less fat cream cheese"},{name:"1 tbsp basil paste, 1/2 cup arugula"},{name:"90g fat-free mozzarella"}]},
+  {id:"tastyshreds_85",name:"High Protein Chicken Alfredo",source:"Tasty Shreds",category:"Tasty Shreds",calories:512,protein:62,carbs:32,fat:15,baseServings:1,ingredients:[{name:"8oz. Banza linguine"},{name:"16oz. cubed chicken breast"},{name:"80g fat-free mozzarella"},{name:"395g fat-free cottage cheese"},{name:"112g reduced fat cream cheese"},{name:"14 jarred mushrooms"},{name:"basil, Italian seasoning, garlic"}]},
+  {id:"tastyshreds_86",name:"Chicken Pesto Pizza",source:"Tasty Shreds",category:"Tasty Shreds",calories:580,protein:57,carbs:43,fat:20,baseServings:1,ingredients:[{name:"1 large 180-cal pita bread"},{name:"3oz. rotisserie chicken"},{name:"32g reduced fat mozzarella"},{name:"30g fat-free mozzarella"},{name:"61g vegan alfredo or pesto sauce"},{name:"chili flakes, parsley"}]},
+  {id:"tastyshreds_87",name:"Creamy Pesto Arugula Sauce",source:"Tasty Shreds",category:"Tasty Shreds",calories:252,protein:28,carbs:17,fat:8,baseServings:1,ingredients:[{name:"226g fat-free cottage cheese"},{name:"13g reduced fat cream cheese"},{name:"1/2 cup fresh arugula"},{name:"1 tbsp basil paste, 1 tbsp minced garlic"},{name:"Italian seasoning, almond milk"}]},
+  {id:"tastyshreds_88",name:"Bacon Jalapeño Artichoke Dip",source:"Tasty Shreds",category:"Tasty Shreds",calories:866,protein:110,carbs:52,fat:24,baseServings:4,ingredients:[{name:"300g fat-free cottage cheese"},{name:"170g nonfat Greek yogurt"},{name:"100g fat-free mozzarella"},{name:"3 slices reduced fat provolone"},{name:"2 slices center cut bacon"},{name:"2oz. sliced jalapeños (jarred)"},{name:"60g 1/3 less fat cream cheese"},{name:"50g artichoke hearts"}]},
+  {id:"tastyshreds_89",name:"Spicy Rigatoni",source:"Tasty Shreds",category:"Tasty Shreds",calories:417,protein:48,carbs:29,fat:12,baseServings:1,ingredients:[{name:"8oz. Banza rigatoni"},{name:"16oz. 96/4 ground chicken"},{name:"240g fat-free cottage cheese"},{name:"3 laughing cow cheese wedges"},{name:"56g fat-free mozzarella"},{name:"1 serving pasta sauce, almond milk"},{name:"Italian, red garlic, paprika, chili flakes"}]},
+  {id:"tastyshreds_90",name:"Spicy Crispy Chicken Sandwich",source:"Tasty Shreds",category:"Tasty Shreds",calories:371,protein:42,carbs:26,fat:11,baseServings:1,ingredients:[{name:"3oz. chicken breast"},{name:"1 keto bun"},{name:"10-15g corn flakes (coating)"},{name:"1 egg"},{name:"2 thin slices provolone"},{name:"2 tbsp guacamole, 1 tbsp Dijon mustard"},{name:"Frank's buffalo sauce"}]},
+  {id:"tastyshreds_91",name:"High Protein Birthday Cheesecake",source:"Tasty Shreds",category:"Tasty Shreds",calories:811,protein:87,carbs:57,fat:26,baseServings:4,ingredients:[{name:"115g 1/3 less fat cream cheese"},{name:"6 tbsp cool whip lite"},{name:"40g stevia or monk fruit sweetener"},{name:"protein powder, Greek yogurt"},{name:"low cal graham cracker crust"}]},
+  {id:"tastyshreds_92",name:"Cbums Quad Burrito",source:"Tasty Shreds",category:"Tasty Shreds",calories:663,protein:112,carbs:27,fat:12,baseServings:1,ingredients:[{name:"8oz. raw chicken breast"},{name:"2 large xtreme wellness wraps"},{name:"40g fat-free mozzarella"},{name:"4 slices center cut bacon"},{name:"40g nonfat Greek yogurt"},{name:"60g chopped tomato"},{name:"ranch seasoning, paprika"}]},
+  {id:"tastyshreds_93",name:"California Breakfast Burrito",source:"Tasty Shreds",category:"Tasty Shreds",calories:526,protein:48,carbs:41,fat:19,baseServings:1,ingredients:[{name:"1 large wellness wrap"},{name:"2oz. turkey sausage"},{name:"30g reduced fat cheddar"},{name:"2 slices center cut bacon"},{name:"50g guacamole"},{name:"50g egg whites + 1 egg"},{name:"1oz. shoestring fries (45 pieces)"}]},
+  {id:"tastyshreds_94",name:"Costco-Style Protein Pizza Slice",source:"Tasty Shreds",category:"Tasty Shreds",calories:343,protein:40,carbs:23,fat:10,baseServings:1,ingredients:[{name:"30g self-rising flour"},{name:"40g nonfat Greek yogurt"},{name:"75g fat-free mozzarella"},{name:"30g pizza sauce"},{name:"blended reduced fat mozzarella"},{name:"5g turkey pepperoni, oregano"}]},
+  {id:"tastyshreds_95",name:"Thick Boy McMuffins",source:"Tasty Shreds",category:"Tasty Shreds",calories:400,protein:51,carbs:24,fat:11,baseServings:1,ingredients:[{name:"16oz. 96/4 lean ground chicken"},{name:"600g egg whites"},{name:"180g reduced fat cheddar"},{name:"5 keto buns"},{name:"5 velveeta slices"},{name:"sage, fennel, white pepper, oregano"}]},
+  {id:"tastyshreds_96",name:"Smash or Pass Burger",source:"Tasty Shreds",category:"Tasty Shreds",calories:490,protein:53,carbs:36,fat:15,baseServings:1,ingredients:[{name:"5oz. 93/7 beef"},{name:"1 low cal bun"},{name:"2 slices uncured bacon"},{name:"2 slices velveeta"},{name:"chopped onion, jalapeño/bell pepper"},{name:"1 tbsp light mayo, tsp ketchup, tbsp relish"}]},
+  {id:"tastyshreds_97",name:"Gym Freak Pizza 2.0",source:"Tasty Shreds",category:"Tasty Shreds",calories:837,protein:77,carbs:67,fat:29,baseServings:2,ingredients:[{name:"100g self-rising flour"},{name:"15g nonfat Greek yogurt"},{name:"100g pizza sauce"},{name:"40g fat-free mozzarella"},{name:"2oz. 96/4 ground chicken"},{name:"3 slices canadian bacon"},{name:"15g turkey pepperoni"}]},
+  {id:"tastyshreds_98",name:"Crispy Buffalo Chicken Tenders",source:"Tasty Shreds",category:"Tasty Shreds",calories:607,protein:110,carbs:22,fat:9,baseServings:2,ingredients:[{name:"16oz. thin chicken breasts"},{name:"30g self-rising flour"},{name:"5 tbsp Frank's buffalo sauce"},{name:"cayenne pepper, pickle juice"},{name:"baking soda + baking powder"},{name:"garlic salt"},{name:"100g nonfat Greek yogurt (ranch dip)"},{name:"2 tbsp hidden valley ranch seasoning"}]},
+  {id:"tastyshreds_99",name:"Crispy Chicken Sandwich Meal Prep",source:"Tasty Shreds",category:"Tasty Shreds",calories:207,protein:21,carbs:15,fat:7,baseServings:1,ingredients:[{name:"15oz. 94/6 ground chicken"},{name:"7 keto buns"},{name:"35g flour"},{name:"1 egg, baking powder/soda"},{name:"paprika, onion powder, garlic paste"},{name:"mustard, lettuce, 7 tbsp light mayo"}]},
+  {id:"tastyshreds_100",name:"Chicken McShreddies",source:"Tasty Shreds",category:"Tasty Shreds",calories:697,protein:95,carbs:39,fat:18,baseServings:1,ingredients:[{name:"16oz. 96/4 ground chicken"},{name:"40g self-rising flour"},{name:"2 eggs + pickle juice"},{name:"baking soda + baking powder"},{name:"cayenne, garlic paste, mustard, salt, pepper"}]},
+  {id:"tastyshreds_101",name:"Crispy Tinga Chicken Tacos",source:"Tasty Shreds",category:"Tasty Shreds",calories:327,protein:51,carbs:15,fat:7,baseServings:1,ingredients:[{name:"4oz. chicken breast"},{name:"4 carb counter tortillas"},{name:"120g reduced fat mozzarella"},{name:"4 chopped chipotle peppers"},{name:"1/2 white onion, garlic, onion powder"}]},
+  {id:"tastyshreds_102",name:"Perfect Steak Breakfast Burrito",source:"Tasty Shreds",category:"Tasty Shreds",calories:520,protein:50,carbs:40,fat:18,baseServings:1,ingredients:[{name:"3oz. asado or sirloin steak"},{name:"2 eggs"},{name:"28g reduced fat cheddar"},{name:"1 velveeta slice"},{name:"20g frozen diced potato"},{name:"1 xtreme wellness wrap"}]},
+  {id:"tastyshreds_103",name:"Pollo Asado Tacos",source:"Tasty Shreds",category:"Tasty Shreds",calories:192,protein:25,carbs:12,fat:5,baseServings:1,ingredients:[{name:"3oz. pollo asado chicken"},{name:"carb counter corn tortillas"},{name:"100g nonfat Greek yogurt (crema)"},{name:"4 tbsp cilantro, lime juice"},{name:"salt and pepper"}]},
+  {id:"tastyshreds_104",name:"Shredded Grinder",source:"Tasty Shreds",category:"Tasty Shreds",calories:462,protein:41,carbs:36,fat:17,baseServings:1,ingredients:[{name:"5oz. shredded chicken or beef"},{name:"1 low cal hoagie roll"},{name:"low cal cheese"},{name:"peppers, pickled onions, lettuce"},{name:"red wine vinegar, pickles"}]},
+  {id:"tastyshreds_105",name:"Barbacoa Quesadilla",source:"Tasty Shreds",category:"Tasty Shreds",calories:676,protein:70,carbs:50,fat:22,baseServings:2,ingredients:[{name:"5oz. Del Real barbacoa"},{name:"2 carb balance tortillas"},{name:"reduced fat mozzarella"},{name:"cilantro, chipotle peppers in adobo"},{name:"tomato paste, nonfat Greek yogurt"}]},
+  {id:"tastyshreds_106",name:"Big Mac Smash Burger",source:"Tasty Shreds",category:"Tasty Shreds",calories:676,protein:70,carbs:50,fat:22,baseServings:2,ingredients:[{name:"8oz. 93/7 beef (smashed)"},{name:"2 keto buns"},{name:"velveeta slices"},{name:"pickles, white onion, shredded lettuce"},{name:"big mac sauce: light mayo, ketchup, relish, mustard"}]},
+  {id:"tastyshreds_107",name:"Creamy Chicken Fajita Burrito",source:"Tasty Shreds",category:"Tasty Shreds",calories:547,protein:58,carbs:38,fat:18,baseServings:1,ingredients:[{name:"5oz. chicken breast (fajita seasoned)"},{name:"1 xtreme wellness wrap"},{name:"fajita peppers & onions"},{name:"160g nonfat Greek yogurt (cheese sauce)"},{name:"chipotle peppers, almond milk"},{name:"1 serving cheesy meal booster"}]},
+  {id:"tastyshreds_108",name:"Chicken Parmesan",source:"Tasty Shreds",category:"Tasty Shreds",calories:473,protein:60,carbs:29,fat:13,baseServings:1,ingredients:[{name:"6oz. chicken breast (breaded)"},{name:"100g marinara sauce"},{name:"3 low cal mozzarella slices"},{name:"1 cup basil, 2 tbsp basil paste"},{name:"1 tbsp garlic paste"}]},
+  {id:"tastyshreds_109",name:"Creamy Pizza Protein Burritos",source:"Tasty Shreds",category:"Tasty Shreds",calories:312,protein:32,carbs:24,fat:10,baseServings:1,ingredients:[{name:"1 carb balance tortilla"},{name:"turkey pepperoni, canadian bacon"},{name:"pizza sauce"},{name:"fat-free mozzarella"},{name:"laughing cow cream cheese wedge"}]},
+  {id:"tastyshreds_110",name:"Spicy McMuffins",source:"Tasty Shreds",category:"Tasty Shreds",calories:277,protein:32,carbs:19,fat:8,baseServings:1,ingredients:[{name:"300g egg whites"},{name:"5 slices velveeta"},{name:"5 tbsp green chile queso"},{name:"5 keto english muffins"},{name:"50g reduced fat cheddar"}]},
+  {id:"tastyshreds_111",name:"Mrs. Shreds Breakfast Bowl",source:"Tasty Shreds",category:"Tasty Shreds",calories:560,protein:53,carbs:44,fat:19,baseServings:1,ingredients:[{name:"12oz. cubed ham"},{name:"5 slices center cut bacon"},{name:"60g reduced fat cheddar"},{name:"1 tbsp guacamole"},{name:"40-50g nonfat Greek yogurt"},{name:"potatoes, eggs or egg whites"}]},
+  {id:"tastyshreds_112",name:"Quatro BLT Burger",source:"Tasty Shreds",category:"Tasty Shreds",calories:400,protein:50,carbs:25,fat:11,baseServings:1,ingredients:[{name:"5oz. 93/7 beef"},{name:"1 keto bun"},{name:"velveeta slice"},{name:"turkey bacon, lettuce, tomato"},{name:"burger sauce: mayo, ketchup, mustard"}]},
+  {id:"tastyshreds_113",name:"Lean BLT",source:"Tasty Shreds",category:"Tasty Shreds",calories:500,protein:40,carbs:42,fat:19,baseServings:1,ingredients:[{name:"turkey bacon, lettuce, tomato"},{name:"2 slices low cal bread"},{name:"nonfat Greek yogurt (chipotle sauce)"},{name:"fresh garlic, chipotle peppers"}]},
+  {id:"tastyshreds_114",name:"Shred Lab Fiesta Salad",source:"Tasty Shreds",category:"Tasty Shreds",calories:481,protein:73,carbs:25,fat:10,baseServings:1,ingredients:[{name:"5oz. seasoned chicken breast"},{name:"romaine lettuce, tomato, black beans"},{name:"fat-free cheddar, jalapeños"},{name:"259g nonfat Greek yogurt (chipotle ranch)"},{name:"2 garlic cloves, chives, cilantro"}]},
+  {id:"tastyshreds_115",name:"Deviled Egg Salmon Wrap",source:"Tasty Shreds",category:"Tasty Shreds",calories:415,protein:43,carbs:29,fat:14,baseServings:1,ingredients:[{name:"3oz. canned salmon"},{name:"2 boiled eggs"},{name:"3 tbsp Dijon mustard"},{name:"2 low cal tortillas"},{name:"2 slices turkey bacon"},{name:"paprika, salt, pepper"}]},
+  {id:"tastyshreds_116",name:"Bacon Garlic Steak Fries",source:"Tasty Shreds",category:"Tasty Shreds",calories:540,protein:40,carbs:48,fat:21,baseServings:1,ingredients:[{name:"5oz. sirloin steak"},{name:"150g seasoned fries"},{name:"center cut bacon"},{name:"150g nonfat Greek yogurt (garlic ranch)"},{name:"2 tbsp chopped garlic, chives"},{name:"1 tbsp lemon cracked pepper"}]},
+  {id:"tastyshreds_117",name:"Pizza Tacos",source:"Tasty Shreds",category:"Tasty Shreds",calories:330,protein:45,carbs:20,fat:8,baseServings:1,ingredients:[{name:"90g canadian bacon"},{name:"3 carb counter tortillas"},{name:"60g pizza sauce"},{name:"90g fat free cheese"},{name:"45g reduced fat cheese"},{name:"Italian seasoning, garlic"}]},
+  {id:"tastyshreds_118",name:"Gym Freak 3.0 Pizza",source:"Tasty Shreds",category:"Tasty Shreds",calories:860,protein:83,carbs:67,fat:29,baseServings:2,ingredients:[{name:"100g self-rising flour"},{name:"Greek yogurt (dough)"},{name:"pizza sauce, fat-free mozzarella"},{name:"3oz. 93/7 beef"},{name:"3 slices canadian bacon"},{name:"2 slices center cut bacon"},{name:"white onion, seasonings"}]},
+  {id:"tastyshreds_119",name:"Creamy Enchilada Burrito Dippers",source:"Tasty Shreds",category:"Tasty Shreds",calories:217,protein:24,carbs:14,fat:7,baseServings:1,ingredients:[{name:"16oz. chicken breast"},{name:"6 mission carb balance tortillas"},{name:"100g reduced fat cheddar"},{name:"30g 1/3 less fat cream cheese"},{name:"1/2 cup refried beans (fat-free)"},{name:"1/2 cup red enchilada sauce (dipping)"},{name:"rotel diced tomato & green chiles"}]},
+  {id:"tastyshreds_120",name:"Creamy Buffalo Pizza Dippers",source:"Tasty Shreds",category:"Tasty Shreds",calories:415,protein:48,carbs:29,fat:12,baseServings:1,ingredients:[{name:"12oz. grilled chicken"},{name:"6 mission carb balance tortillas"},{name:"120g reduced fat cheddar"},{name:"70g 1/3 less fat cream cheese"},{name:"60g turkey pepperoni"},{name:"1/2 cup Frank's buffalo sauce"},{name:"chives, garlic seasoning"}]},
+  {id:"tastyshreds_121",name:"Buffalo Chicken Bacon Bagels",source:"Tasty Shreds",category:"Tasty Shreds",calories:492,protein:56,carbs:33,fat:15,baseServings:1,ingredients:[{name:"1 everything bagel (low cal)"},{name:"2 slices center cut bacon"},{name:"2.75oz. grilled chicken"},{name:"60g reduced fat cheddar"},{name:"1 slice thin provolone"},{name:"14.5g 1/3 less fat cream cheese"},{name:"1/8 cup Frank's buffalo sauce"}]},
+  {id:"tastyshreds_122",name:"Steak & Cheese Breakfast Tacos",source:"Tasty Shreds",category:"Tasty Shreds",calories:312,protein:30,carbs:23,fat:11,baseServings:1,ingredients:[{name:"1.3oz. sirloin tip steak"},{name:"1 low cal flour tortilla"},{name:"1.7 eggs"},{name:"1 slice center cut bacon"},{name:"13g reduced fat cheddar"},{name:"1 tbsp nacho cheese"},{name:"hot sauce, pico, cilantro (optional)"}]},
+  {id:"tastyshreds_123",name:"Garlic Steak Alfredo Mac",source:"Tasty Shreds",category:"Tasty Shreds",calories:568,protein:57,carbs:42,fat:19,baseServings:1,ingredients:[{name:"6oz. top round steak"},{name:"2oz. Banza macaroni"},{name:"100g 1/3 less fat cream cheese"},{name:"60g fat-free mozzarella"},{name:"200ml fat-free milk"},{name:"6 garlic cloves, white onion"},{name:"steak seasoning, salt, pepper"}]},
+  {id:"tastyshreds_124",name:"Chicken Bacon Ranch Burrito",source:"Tasty Shreds",category:"Tasty Shreds",calories:430,protein:42,carbs:28,fat:12,baseServings:1,ingredients:[{name:"3.4oz. chicken breast"},{name:"1 slice center cut bacon"},{name:"1 mission carb balance tortilla"},{name:"16g reduced fat cheddar"},{name:"30g nonfat Greek yogurt (ranch sauce)"},{name:"cilantro, chipotle pepper, lime, garlic"}]},
+  {id:"tastyshreds_125",name:"Chick-N-Out Burger",source:"Tasty Shreds",category:"Tasty Shreds",calories:455,protein:52,carbs:30,fat:14,baseServings:1,ingredients:[{name:"6oz. chicken breast"},{name:"80g crushed corn flakes (coating)"},{name:"1 keto bun"},{name:"4 tbsp nashville hot seasoning"},{name:"tomato, white onion, pickles, lettuce"}]},
+  {id:"tastyshreds_126",name:"Ham Breakfast Hot Pockets",source:"Tasty Shreds",category:"Tasty Shreds",calories:490,protein:44,carbs:40,fat:17,baseServings:1,ingredients:[{name:"2 eggs"},{name:"1 mission carb balance tortilla"},{name:"35g reduced fat cheese"},{name:"2oz. frick's ham"},{name:"2 tbsp nacho cheese"},{name:"green & red bell pepper, white onion"}]},
+  {id:"tastyshreds_127",name:"Bang Bang Chicken Bites",source:"Tasty Shreds",category:"Tasty Shreds",calories:274,protein:27,carbs:21,fat:9,baseServings:1,ingredients:[{name:"4oz. chicken breast (cubed)"},{name:"50g corn flakes (coating)"},{name:"1 slice center cut bacon"},{name:"bang bang sauce: light mayo (or Greek yogurt)"},{name:"sriracha, Frank's sweet chili, chili flakes"},{name:"1 tbsp honey (optional)"}]},
+  {id:"tastyshreds_128",name:"Chicken Bacon Ranch Fries",source:"Tasty Shreds",category:"Tasty Shreds",calories:428,protein:46,carbs:30,fat:14,baseServings:1,ingredients:[{name:"5.3oz. chicken breast"},{name:"1.7 slices center cut bacon"},{name:"86g seasoned shoestring fries"},{name:"19g reduced fat cheddar"},{name:"protein ranch: 67g nonfat Greek yogurt"},{name:"13ml fat-free milk, garlic, onion powder"}]},
+  {id:"tastyshreds_129",name:"Buffalo Ranch Snack Wraps",source:"Tasty Shreds",category:"Tasty Shreds",calories:252,protein:28,carbs:17,fat:8,baseServings:1,ingredients:[{name:"4oz. chicken breast"},{name:"1 mission carb balance tortilla"},{name:"9g corn flakes (coating)"},{name:"garlic paste, tomato, romaine lettuce"},{name:"mustard, Frank's buffalo sauce"},{name:"protein ranch (Greek yogurt + ranch seasoning)"}]},
+  {id:"tastyshreds_130",name:"In-N-Out Style Grilled Cheese",source:"Tasty Shreds",category:"Tasty Shreds",calories:441,protein:63,carbs:25,fat:10,baseServings:1,ingredients:[{name:"6oz. 96/4 beef"},{name:"1 keto bun"},{name:"1 velveeta slice"},{name:"lettuce, tomato, white onion"},{name:"copycat sauce: light mayo, zero sugar ketchup"},{name:"mustard, sweet relish, white vinegar"}]},
+];
+
+/* ══════════════════════════════════════════════════
    FITNESS HUB — MAIN APP COMPONENT
 ══════════════════════════════════════════════════ */
 function FitnessHub() {
@@ -562,6 +698,8 @@ function FitnessHub() {
   const [screen,       setScreen]       = useState('home');
   const [trainTab,     setTrainTab]     = useState('today');
   const [shopTab,      setShopTab]      = useState('list');
+  const [cookbookTab,  setCookbookTab]  = useState('shreds');
+  const [shredsSearch, setShredsSearch] = useState('');
   const [showSettings, setShowSettings] = useState(false);
   const [showBarcode,  setShowBarcode]  = useState(false);
   const [lookingUpFood, setLookingUpFood] = useState(false);
@@ -1505,6 +1643,9 @@ After searching, reply with ONLY a valid JSON array, no markdown:
   /* ── COOKBOOK ── */
   function CookbookScreen() {
     const allRecipes = [...saved, ...onlineResults.filter(o => !saved.find(s => s.id === o.id))];
+    const shredsFiltered = shredsSearch.trim()
+      ? TASTY_SHREDS_RECIPES.filter(r => r.name.toLowerCase().includes(shredsSearch.toLowerCase()) || r.ingredients.some(i => (i.name||'').toLowerCase().includes(shredsSearch.toLowerCase())))
+      : TASTY_SHREDS_RECIPES;
 
     if (activeRecipe) {
       const cost = estimateRecipeCost(activeRecipe);
@@ -1634,61 +1775,109 @@ After searching, reply with ONLY a valid JSON array, no markdown:
       );
     }
 
+    // Shared recipe card renderer
+    function RecipeCard({ r }) {
+      const cost = estimateRecipeCost(r);
+      const isSaved = !!saved.find(s => s.id === r.id);
+      const isShreds = r.source === 'Tasty Shreds';
+      return (
+        <div onClick={() => { setRecipeSwaps(null); setActiveRecipe(r); }} style={{ background: isShreds ? 'rgba(255,107,74,0.05)' : 'rgba(255,255,255,0.03)', borderRadius: 16, padding: 14, marginBottom: 10, border: `1px solid ${isShreds ? 'rgba(255,107,74,0.2)' : r.source === 'web' ? 'rgba(74,158,255,0.15)' : r.source === 'claude' ? 'rgba(168,85,247,0.15)' : 'rgba(255,255,255,0.06)'}`, cursor: 'pointer' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 5 }}>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 14, fontWeight: 600, color: '#fff', marginBottom: 2 }}>{r.name}</div>
+              {isShreds && <div style={{ fontSize: 9, color: '#FF6B4A', letterSpacing: 1 }}>TASTY SHREDS</div>}
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
+              <StarRating id={r.id} ratings={ratings} setRatings={setRatings} size={12} />
+              {isSaved && <span style={{ fontSize: 9, color: '#4BDE80', border: '1px solid rgba(75,222,128,0.3)', borderRadius: 4, padding: '1px 5px' }}>SAVED</span>}
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+            {r.calories > 0 && <span style={{ fontSize: 11, color: '#FF6B4A' }}>{r.calories} cal</span>}
+            {r.protein > 0 && <span style={{ fontSize: 11, color: '#4A9EFF' }}>{r.protein}g protein</span>}
+            {r.carbs > 0 && <span style={{ fontSize: 11, color: '#A855F7' }}>{r.carbs}g carbs</span>}
+            {r.fat > 0 && <span style={{ fontSize: 11, color: '#F5C842' }}>{r.fat}g fat</span>}
+            {cost > 0 && <span style={{ fontSize: 11, color: '#4BDE80' }}>${cost.toFixed(2)}/srv</span>}
+          </div>
+        </div>
+      );
+    }
+
     return (
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-        <div style={{ padding: '14px 16px', flexShrink: 0, borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
-          <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
-            <input value={searchQ} onChange={e => setSearchQ(e.target.value)} placeholder="Search online recipes…"
-              style={{ flex: 1, padding: '10px 14px', borderRadius: 12, border: '1px solid rgba(255,255,255,0.1)', background: 'rgba(255,255,255,0.04)', color: '#fff', fontSize: 13, fontFamily: 'inherit', outline: 'none' }}
-              onKeyDown={e => e.key === 'Enter' && searchRecipes()} />
-            <button onClick={searchRecipes} disabled={searching} style={{ padding: '10px 16px', borderRadius: 12, border: 'none', background: '#4A9EFF', color: '#000', fontFamily: "'Oswald',sans-serif", fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>
-              {searching ? '…' : 'SEARCH'}
+
+        {/* Tab bar */}
+        <div style={{ display: 'flex', padding: '0 16px', paddingTop: 12, flexShrink: 0, borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+          {[['shreds','🔥 TASTY SHREDS'],['my','📖 MY RECIPES'],['search','🔍 SEARCH']].map(([k,l]) => (
+            <button key={k} onClick={() => setCookbookTab(k)} style={{ flex: 1, padding: '10px 4px', border: 'none', borderBottom: `2px solid ${cookbookTab === k ? '#FF6B4A' : 'rgba(255,255,255,0.06)'}`, background: 'transparent', color: cookbookTab === k ? '#FF6B4A' : '#555', fontFamily: "'Oswald',sans-serif", fontSize: 11, fontWeight: 600, cursor: 'pointer', letterSpacing: 0.5 }}>
+              {l}
             </button>
-          </div>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <input value={importUrl} onChange={e => setImportUrl(e.target.value)} placeholder="Paste TikTok / Instagram / any URL…"
-              style={{ flex: 1, padding: '9px 14px', borderRadius: 12, border: '1px solid rgba(255,255,255,0.08)', background: 'rgba(255,255,255,0.03)', color: '#fff', fontSize: 12, fontFamily: 'inherit', outline: 'none' }} />
-            <button onClick={importFromUrl} disabled={importing} style={{ padding: '9px 14px', borderRadius: 12, border: '1px solid rgba(168,85,247,0.4)', background: 'rgba(168,85,247,0.1)', color: '#A855F7', fontFamily: "'Oswald',sans-serif", fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
-              {importing ? '…' : 'IMPORT'}
-            </button>
-          </div>
+          ))}
         </div>
 
-        <div style={{ flex: 1, overflowY: 'auto', padding: '10px 16px' }}>
-          {allRecipes.length === 0 ? (
-            <div style={{ textAlign: 'center', padding: '60px 0', color: '#444' }}>
-              <div style={{ fontSize: 40, marginBottom: 10 }}>📖</div>
-              <div style={{ fontSize: 14, marginBottom: 6 }}>No recipes yet</div>
-              <div style={{ fontSize: 12, color: '#333' }}>Search online or import from a URL above</div>
+        {/* TASTY SHREDS tab */}
+        {cookbookTab === 'shreds' && (
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+            <div style={{ padding: '10px 16px', flexShrink: 0 }}>
+              <input value={shredsSearch} onChange={e => setShredsSearch(e.target.value)} placeholder="Search 130 Tasty Shreds recipes…"
+                style={{ width: '100%', padding: '10px 14px', borderRadius: 12, border: '1px solid rgba(255,107,74,0.25)', background: 'rgba(255,107,74,0.05)', color: '#fff', fontSize: 13, fontFamily: 'inherit', outline: 'none', boxSizing: 'border-box' }} />
+              <div style={{ fontSize: 10, color: '#555', marginTop: 6, textAlign: 'center' }}>130 high-protein recipes · Kyle Smith's Tasty Shreds cookbook</div>
             </div>
-          ) : allRecipes.map(r => {
-            const cost = estimateRecipeCost(r);
-            const isSaved = !!saved.find(s => s.id === r.id);
-            return (
-              <div key={r.id} onClick={() => { setRecipeSwaps(null); setActiveRecipe(r); }} style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 16, padding: 14, marginBottom: 10, border: `1px solid ${r.source === 'web' ? 'rgba(74,158,255,0.15)' : r.source === 'claude' ? 'rgba(168,85,247,0.15)' : 'rgba(255,255,255,0.06)'}`, cursor: 'pointer' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 5 }}>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: 14, fontWeight: 600, color: '#fff', marginBottom: 2 }}>{r.name}</div>
-                    <div style={{ fontSize: 10, color: '#555' }}>{r.category}{r.area ? ` · ${r.area}` : ''}{(r.prepTime || r.cookTime) ? ` · ⏱ ${[r.prepTime, r.cookTime].filter(Boolean).join(' + ')}` : ''}</div>
-                  </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
-                    <StarRating id={r.id} ratings={ratings} setRatings={setRatings} size={12} />
-                    {isSaved && <span style={{ fontSize: 9, color: '#4BDE80', border: '1px solid rgba(75,222,128,0.3)', borderRadius: 4, padding: '1px 5px' }}>SAVED</span>}
-                  </div>
-                </div>
-                {r.macroTip && <div style={{ fontSize: 11, color: '#888', fontStyle: 'italic', marginBottom: 5, lineHeight: 1.4 }}>💡 {r.macroTip}</div>}
-                <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-                  {r.calories > 0 && <span style={{ fontSize: 11, color: '#FF6B4A' }}>{r.calories} cal</span>}
-                  {r.protein > 0 && <span style={{ fontSize: 11, color: '#4A9EFF' }}>{r.protein}g protein</span>}
-                  {r.carbs > 0 && <span style={{ fontSize: 11, color: '#A855F7' }}>{r.carbs}g carbs</span>}
-                  {r.fat > 0 && <span style={{ fontSize: 11, color: '#F5C842' }}>{r.fat}g fat</span>}
-                  {cost > 0 && <span style={{ fontSize: 11, color: '#4BDE80' }}>${cost.toFixed(2)}/srv</span>}
-                </div>
+            <div style={{ flex: 1, overflowY: 'auto', padding: '4px 16px' }}>
+              {shredsFiltered.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '40px 0', color: '#444' }}>No recipes match "{shredsSearch}"</div>
+              ) : shredsFiltered.map(r => <RecipeCard key={r.id} r={r} />)}
+              <div style={{ height: 80 }} />
+            </div>
+          </div>
+        )}
+
+        {/* MY RECIPES tab */}
+        {cookbookTab === 'my' && (
+          <div style={{ flex: 1, overflowY: 'auto', padding: '10px 16px' }}>
+            {allRecipes.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '60px 0', color: '#444' }}>
+                <div style={{ fontSize: 40, marginBottom: 10 }}>📖</div>
+                <div style={{ fontSize: 14, marginBottom: 6 }}>No saved recipes yet</div>
+                <div style={{ fontSize: 12, color: '#333' }}>Save a Tasty Shreds recipe or search online</div>
               </div>
-            );
-          })}
-          <div style={{ height: 80 }} />
-        </div>
+            ) : allRecipes.map(r => <RecipeCard key={r.id} r={r} />)}
+            <div style={{ height: 80 }} />
+          </div>
+        )}
+
+        {/* SEARCH tab */}
+        {cookbookTab === 'search' && (
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+            <div style={{ padding: '10px 16px', flexShrink: 0 }}>
+              <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+                <input value={searchQ} onChange={e => setSearchQ(e.target.value)} placeholder="Search online recipes…"
+                  style={{ flex: 1, padding: '10px 14px', borderRadius: 12, border: '1px solid rgba(255,255,255,0.1)', background: 'rgba(255,255,255,0.04)', color: '#fff', fontSize: 13, fontFamily: 'inherit', outline: 'none' }}
+                  onKeyDown={e => e.key === 'Enter' && searchRecipes()} />
+                <button onClick={searchRecipes} disabled={searching} style={{ padding: '10px 16px', borderRadius: 12, border: 'none', background: '#4A9EFF', color: '#000', fontFamily: "'Oswald',sans-serif", fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>
+                  {searching ? '…' : 'SEARCH'}
+                </button>
+              </div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <input value={importUrl} onChange={e => setImportUrl(e.target.value)} placeholder="Paste TikTok / Instagram / any URL…"
+                  style={{ flex: 1, padding: '9px 14px', borderRadius: 12, border: '1px solid rgba(255,255,255,0.08)', background: 'rgba(255,255,255,0.03)', color: '#fff', fontSize: 12, fontFamily: 'inherit', outline: 'none' }} />
+                <button onClick={importFromUrl} disabled={importing} style={{ padding: '9px 14px', borderRadius: 12, border: '1px solid rgba(168,85,247,0.4)', background: 'rgba(168,85,247,0.1)', color: '#A855F7', fontFamily: "'Oswald',sans-serif", fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
+                  {importing ? '…' : 'IMPORT'}
+                </button>
+              </div>
+            </div>
+            <div style={{ flex: 1, overflowY: 'auto', padding: '4px 16px' }}>
+              {onlineResults.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '40px 0', color: '#444' }}>
+                  <div style={{ fontSize: 32, marginBottom: 8 }}>🔍</div>
+                  <div>Search for a recipe above</div>
+                  <div style={{ fontSize: 12, marginTop: 4, color: '#333' }}>AI-generated fitness recipes or import from any URL</div>
+                </div>
+              ) : onlineResults.map(r => <RecipeCard key={r.id} r={r} />)}
+              <div style={{ height: 80 }} />
+            </div>
+          </div>
+        )}
       </div>
     );
   }
@@ -2048,7 +2237,7 @@ After searching, reply with ONLY a valid JSON array, no markdown:
 
 /* ── SERVICE WORKER ── */
 if ('serviceWorker' in navigator) {
-  const sw = `const C='drews-hub-v7';self.addEventListener('install',e=>{e.waitUntil(caches.open(C).then(c=>c.addAll(['.'])));self.skipWaiting();});self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==C).map(k=>caches.delete(k)))));self.clients.claim();});self.addEventListener('fetch',e=>{if(e.request.method!=='GET')return;const u=e.request.url;if(u.includes('api.anthropic.com')||u.includes('openfoodfacts')||u.includes('themealdb')||u.includes('fonts.googleapis')||u.includes('cdnjs'))return;e.respondWith(caches.match(e.request).then(r=>r||fetch(e.request).then(res=>{if(res&&res.ok){const cl=res.clone();caches.open(C).then(c=>c.put(e.request,cl));}return res;})));});`;
+  const sw = `const C='drews-hub-v8';self.addEventListener('install',e=>{e.waitUntil(caches.open(C).then(c=>c.addAll(['.'])));self.skipWaiting();});self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==C).map(k=>caches.delete(k)))));self.clients.claim();});self.addEventListener('fetch',e=>{if(e.request.method!=='GET')return;const u=e.request.url;if(u.includes('api.anthropic.com')||u.includes('openfoodfacts')||u.includes('themealdb')||u.includes('fonts.googleapis')||u.includes('cdnjs'))return;e.respondWith(caches.match(e.request).then(r=>r||fetch(e.request).then(res=>{if(res&&res.ok){const cl=res.clone();caches.open(C).then(c=>c.put(e.request,cl));}return res;})));});`;
   try { navigator.serviceWorker.register(URL.createObjectURL(new Blob([sw], { type: 'application/javascript' }))).catch(() => {}); } catch {}
 }
 
