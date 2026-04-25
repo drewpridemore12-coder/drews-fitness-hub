@@ -1112,10 +1112,14 @@ After searching, reply with ONLY a valid JSON array, no markdown:
         const recipe = saved.find(r => r.id === m.recipeId);
         if (!recipe) return;
         (recipe.ingredients || []).forEach(ing => {
-          const k = ing.item.toLowerCase();
-          if (!items[k]) items[k] = { item: ing.item, qty: 0, unit: ing.unit, cost: 0 };
-          items[k].qty  += ing.qty * (m.servings || 1);
-          items[k].cost += estimateIngredientCost(ing.item, ing.qty * (m.servings || 1), ing.unit);
+          const ingItem = ing.item || ing.name || '';
+          const ingQty  = ing.qty != null ? ing.qty : (parseFloat(ing.amount) || 1);
+          const ingUnit = ing.unit || (ing.amount ? (ing.amount.match(/[a-zA-Z]+/)?.[0] || 'oz') : 'oz');
+          const k = ingItem.toLowerCase();
+          if (!k) return;
+          if (!items[k]) items[k] = { item: ingItem, qty: 0, unit: ingUnit, cost: 0 };
+          items[k].qty  += ingQty * (m.servings || 1);
+          items[k].cost += estimateIngredientCost(ingItem, ingQty * (m.servings || 1), ingUnit);
         });
       });
     });
@@ -1136,6 +1140,35 @@ After searching, reply with ONLY a valid JSON array, no markdown:
   function addManualShopItem(text) {
     if (!text.trim()) return;
     setShopList(p => [...p, { id: Date.now(), text: text.trim(), estCost: 0, checked: false }]);
+  }
+
+  function addRecipeToShopList(recipe) {
+    const newItems = (recipe.ingredients || []).map((i, idx) => {
+      const itemName = i.item || i.name || '';
+      const qty = i.qty != null ? i.qty : (parseFloat(i.amount) || 1);
+      const unit = i.unit || (i.amount ? (i.amount.match(/[a-zA-Z]+/)?.[0] || '') : '');
+      const displayText = unit ? `${qty} ${unit} ${itemName}` : (i.amount ? `${i.amount} ${itemName}` : itemName);
+      return {
+        id: Date.now() + idx,
+        text: displayText.trim(),
+        estCost: estimateIngredientCost(itemName, qty, unit || 'oz'),
+        checked: false,
+        source: recipe.name
+      };
+    });
+    setShopList(p => [...p, ...newItems]);
+    showToast(`Added ${newItems.length} ingredients to shopping list! 🛒`, 'success');
+  }
+
+  function orderOnWalmart() {
+    const items = shopList.filter(i => !i.checked);
+    if (!items.length) { showToast('No unchecked items to order', 'error'); return; }
+    showToast(`Opening ${items.length} Walmart searches…`, 'success');
+    items.forEach((item, idx) => {
+      setTimeout(() => {
+        window.open(`https://www.walmart.com/search?q=${encodeURIComponent(item.text)}`, '_blank');
+      }, idx * 400);
+    });
   }
 
   function addGrocerySpend(amount, note) {
@@ -1555,6 +1588,9 @@ After searching, reply with ONLY a valid JSON array, no markdown:
                 📅 PLAN
               </button>
             </div>
+            <button onClick={() => { addRecipeToShopList(activeRecipe); setScreen('shop'); }} style={{ width: '100%', padding: 13, borderRadius: 13, border: '1px solid rgba(245,200,66,0.4)', background: 'rgba(245,200,66,0.1)', color: '#F5C842', fontFamily: "'Oswald',sans-serif", fontSize: 14, fontWeight: 700, cursor: 'pointer', marginBottom: 8 }}>
+              🛒 ADD INGREDIENTS TO SHOPPING LIST
+            </button>
 
             {(!activeRecipe.calories || activeRecipe.calories === 0) && (
               <button onClick={async () => {
@@ -1772,11 +1808,17 @@ After searching, reply with ONLY a valid JSON array, no markdown:
               </div>
             )}
 
+            {shopList.length > 0 && shopList.some(i => !i.checked) && (
+              <button onClick={orderOnWalmart} style={{ width: '100%', padding: 13, borderRadius: 13, border: 'none', background: 'linear-gradient(135deg,#0071ce,#004c97)', color: '#fff', fontFamily: "'Oswald',sans-serif", fontSize: 15, fontWeight: 700, cursor: 'pointer', marginBottom: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+                <span style={{ fontSize: 18 }}>🛒</span> ORDER UNCHECKED ON WALMART
+              </button>
+            )}
+
             {shopList.length === 0 ? (
               <div style={{ textAlign: 'center', padding: '60px 0', color: '#444' }}>
                 <div style={{ fontSize: 40, marginBottom: 8 }}>🛒</div>
                 <div>List is empty</div>
-                <div style={{ fontSize: 12, marginTop: 4, color: '#333' }}>Build from meal plan or add manually</div>
+                <div style={{ fontSize: 12, marginTop: 4, color: '#333' }}>Build from meal plan, add from a recipe, or add manually</div>
               </div>
             ) : shopList.map(item => (
               <div key={item.id} onClick={() => toggleShopItem(item.id)} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px', borderRadius: 12, marginBottom: 6, background: item.checked ? 'rgba(75,222,128,0.04)' : 'rgba(255,255,255,0.03)', border: `1px solid ${item.checked ? 'rgba(75,222,128,0.15)' : 'rgba(255,255,255,0.06)'}`, cursor: 'pointer' }}>
@@ -2006,7 +2048,7 @@ After searching, reply with ONLY a valid JSON array, no markdown:
 
 /* ── SERVICE WORKER ── */
 if ('serviceWorker' in navigator) {
-  const sw = `const C='drews-hub-v6';self.addEventListener('install',e=>{e.waitUntil(caches.open(C).then(c=>c.addAll(['.'])));self.skipWaiting();});self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==C).map(k=>caches.delete(k)))));self.clients.claim();});self.addEventListener('fetch',e=>{if(e.request.method!=='GET')return;const u=e.request.url;if(u.includes('api.anthropic.com')||u.includes('openfoodfacts')||u.includes('themealdb')||u.includes('fonts.googleapis')||u.includes('cdnjs'))return;e.respondWith(caches.match(e.request).then(r=>r||fetch(e.request).then(res=>{if(res&&res.ok){const cl=res.clone();caches.open(C).then(c=>c.put(e.request,cl));}return res;})));});`;
+  const sw = `const C='drews-hub-v7';self.addEventListener('install',e=>{e.waitUntil(caches.open(C).then(c=>c.addAll(['.'])));self.skipWaiting();});self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==C).map(k=>caches.delete(k)))));self.clients.claim();});self.addEventListener('fetch',e=>{if(e.request.method!=='GET')return;const u=e.request.url;if(u.includes('api.anthropic.com')||u.includes('openfoodfacts')||u.includes('themealdb')||u.includes('fonts.googleapis')||u.includes('cdnjs'))return;e.respondWith(caches.match(e.request).then(r=>r||fetch(e.request).then(res=>{if(res&&res.ok){const cl=res.clone();caches.open(C).then(c=>c.put(e.request,cl));}return res;})));});`;
   try { navigator.serviceWorker.register(URL.createObjectURL(new Blob([sw], { type: 'application/javascript' }))).catch(() => {}); } catch {}
 }
 
