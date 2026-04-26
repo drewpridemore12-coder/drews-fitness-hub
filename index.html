@@ -703,6 +703,9 @@ function FitnessHub() {
   const [accentColor,  setAccentColor]  = useState(() => load('accentColor', '#4BDE80'));
   const [hubWidgets,   setHubWidgets]   = useState(() => load('hubWidgets', { plan:true, macros:true, log:true, streak:true }));
   const [onboarded,    setOnboarded]    = useState(() => load('onboarded', false));
+  /* ── challenges ── */
+  const [myChallenges,    setMyChallenges]    = useState(() => load('myChallenges', []));
+  const [pendingChallenge, setPendingChallenge] = useState(null);
 
   /* ── ephemeral UI ── */
   const [screen,       setScreen]       = useState('home');
@@ -778,6 +781,7 @@ function FitnessHub() {
   useEffect(() => save('accentColor',  accentColor),  [accentColor]);
   useEffect(() => save('hubWidgets',   hubWidgets),   [hubWidgets]);
   useEffect(() => save('onboarded',    onboarded),    [onboarded]);
+  useEffect(() => save('myChallenges', myChallenges), [myChallenges]);
   /* sync settings staging state whenever the modal opens */
   useEffect(() => {
     if (showSettings) { setSKey(apiKey); setSUrl(vercelUrl); setSBudget(String(weekBudget)); setSVaultName(vaultName); }
@@ -796,6 +800,13 @@ function FitnessHub() {
         if (s.n) { setVaultName(s.n);  save('vaultName',  s.n); }
         window.history.replaceState(null, '', window.location.pathname);
         showToast('⚡ Settings synced from link!', 'success');
+      } catch {}
+    }
+    if (hash.startsWith('#join=')) {
+      try {
+        const c = JSON.parse(atob(hash.slice(6)));
+        setPendingChallenge(c);
+        window.history.replaceState(null, '', window.location.pathname);
       } catch {}
     }
   }, []);
@@ -1541,6 +1552,21 @@ After searching, reply with ONLY a valid JSON array, no markdown:
             ))}
           </div>
         )}
+
+        {/* ── CHALLENGES CARD ── */}
+        <button onClick={() => setScreen('challenges')} style={{ width:'100%', padding:0, border:'none', background:'transparent', cursor:'pointer', marginBottom:14, textAlign:'left' }}>
+          <div style={{ background:`linear-gradient(120deg,${accentColor}18 0%,rgba(168,85,247,0.12) 100%)`, borderRadius:18, padding:'14px 16px', border:`1px solid ${accentColor}30`, display:'flex', alignItems:'center', gap:14 }}>
+            <div style={{ width:46, height:46, borderRadius:14, background:`${accentColor}22`, display:'flex', alignItems:'center', justifyContent:'center', fontSize:26, flexShrink:0 }}>🏆</div>
+            <div style={{ flex:1 }}>
+              <div style={{ fontFamily:"'Oswald',sans-serif", fontSize:15, fontWeight:700, color:'#fff', marginBottom:2 }}>CHALLENGE A FRIEND</div>
+              <div style={{ fontSize:11, color:'#4a6a7a' }}>
+                {myChallenges.length === 0 ? 'Race to crush your goals together' : `${myChallenges.length} active challenge${myChallenges.length!==1?'s':''} — tap to view`}
+              </div>
+            </div>
+            <div style={{ fontSize:20, color:accentColor, flexShrink:0 }}>→</div>
+          </div>
+        </button>
+
         <div style={{ height: 80 }} />
       </div>
     );
@@ -2147,6 +2173,331 @@ After searching, reply with ONLY a valid JSON array, no markdown:
             <div style={{ height: 80 }} />
           </div>
         )}
+      </div>
+    );
+  }
+
+  /* ══════════════════════════════════════════════
+     CHALLENGES SCREEN
+  ══════════════════════════════════════════════ */
+  function ChallengesScreen() {
+    const [cView,       setCView]       = useState('list');
+    const [cType,       setCType]       = useState('protein');
+    const [cTitleVal,   setCTitleVal]   = useState('');
+    const [cTargetVal,  setCTargetVal]  = useState('');
+    const [cDaysVal,    setCDaysVal]    = useState('7');
+    const [cFriend,     setCFriend]     = useState('');
+    const [createdLink, setCreatedLink] = useState(null);
+
+    const CTYPES = [
+      { id:'protein',  emoji:'💪', label:'Protein',     unit:'g/day',    hint:`${GOAL_PRESETS[userGoal].protein}g`,  defaultT: GOAL_PRESETS[userGoal].protein },
+      { id:'calories', emoji:'🔥', label:'Calories',    unit:'kcal',     hint:`${GOAL_PRESETS[userGoal].cal} kcal`, defaultT: GOAL_PRESETS[userGoal].cal },
+      { id:'workouts', emoji:'🏋️', label:'Workouts',    unit:'sessions', hint:'Complete X sessions',                 defaultT: 5 },
+      { id:'streak',   emoji:'📅', label:'Log Streak',  unit:'days',     hint:'Log food X days in a row',           defaultT: 7 },
+      { id:'budget',   emoji:'💰', label:'Budget Boss', unit:'$/week',   hint:`$${weekBudget}/wk`,                  defaultT: weekBudget },
+      { id:'custom',   emoji:'🎯', label:'Custom',      unit:'',         hint:'Your rules, your call',              defaultT: '' },
+    ];
+    const ct = CTYPES.find(t => t.id === cType) || CTYPES[0];
+
+    function isoDate(d) { return d.toISOString().split('T')[0]; }
+
+    function getDayStatus(challenge, dateStr) {
+      const d = new Date(dateStr + 'T12:00:00');
+      const now = new Date(); now.setHours(23,59,59,0);
+      if (d > now) return 'future';
+      const type = challenge.type;
+      if (type === 'protein') {
+        const arr = load('entries_' + dateStr, []);
+        return arr.reduce((s,e) => s+(e.protein||0), 0) >= challenge.target ? 'done' : 'miss';
+      }
+      if (type === 'calories') {
+        const arr = load('entries_' + dateStr, []);
+        const total = arr.reduce((s,e) => s+(e.cal||0), 0);
+        return total > 0 && total <= challenge.target * 1.05 ? 'done' : total === 0 ? 'miss' : 'over';
+      }
+      if (type === 'streak') {
+        const arr = load('entries_' + dateStr, []);
+        return arr.length > 0 ? 'done' : 'miss';
+      }
+      if (type === 'workouts') {
+        const has = vault.some(w => { try { return isoDate(new Date(w.date)) === dateStr; } catch { return false; } });
+        return has ? 'done' : 'miss';
+      }
+      if (type === 'budget') {
+        const weekStart = new Date(dateStr + 'T00:00:00');
+        weekStart.setDate(weekStart.getDate() - weekStart.getDay());
+        const weekEnd = new Date(weekStart); weekEnd.setDate(weekStart.getDate() + 7);
+        const spend = grocLog.filter(g => { const gd = new Date(g.date); return gd >= weekStart && gd < weekEnd; }).reduce((s,g) => s+(g.amount||0), 0);
+        return spend <= challenge.target ? 'done' : 'over';
+      }
+      if (type === 'custom') {
+        return (challenge.checkins||[]).includes(dateStr) ? 'done' : 'miss';
+      }
+      return 'miss';
+    }
+
+    function getProgress(challenge) {
+      const start = new Date(challenge.startDate + 'T00:00:00');
+      const days = [];
+      for (let i = 0; i < challenge.durationDays; i++) {
+        const d = new Date(start); d.setDate(start.getDate() + i);
+        days.push({ dateStr: isoDate(d), status: getDayStatus(challenge, isoDate(d)) });
+      }
+      if (challenge.type === 'workouts') {
+        const done = vault.filter(w => { try { return new Date(w.date) >= start; } catch { return false; } }).length;
+        const pct  = Math.min(Math.round(done / Math.max(challenge.target,1) * 100), 100);
+        return { days, done, past: challenge.durationDays, total: challenge.target, pct, isCount: true };
+      }
+      const done = days.filter(d => d.status === 'done').length;
+      const past = days.filter(d => d.status !== 'future').length;
+      return { days, done, past, total: challenge.durationDays, pct: past > 0 ? Math.round(done / Math.max(past,1) * 100) : 0 };
+    }
+
+    function buildLink(challenge) {
+      try { return `${location.origin}${location.pathname}#join=${btoa(JSON.stringify({ ...challenge, inviterName: userName }))}`;} catch { return ''; }
+    }
+
+    function doCreate() {
+      const typeObj = CTYPES.find(t => t.id === cType);
+      const challenge = {
+        id: 'ch_' + Date.now(),
+        type: cType,
+        title: cTitleVal.trim() || `${typeObj.label} Challenge`,
+        emoji: typeObj.emoji,
+        target: parseFloat(cTargetVal) || typeObj.defaultT || 1,
+        durationDays: parseInt(cDaysVal) || 7,
+        friendName: cFriend.trim(),
+        createdBy: userName,
+        startDate: isoDate(new Date()),
+        createdAt: Date.now(),
+        checkins: [],
+        isOwn: true,
+      };
+      setMyChallenges(p => [...p, challenge]);
+      const link = buildLink(challenge);
+      setCreatedLink(link);
+      setCView('list');
+      showToast('Challenge created! 🎯', 'success');
+      if (cFriend && navigator.share) navigator.share({ title: challenge.title, text: `${userName} is challenging you!`, url: link }).catch(()=>{});
+    }
+
+    function doCheckIn(id) {
+      const today = isoDate(new Date());
+      setMyChallenges(p => p.map(c => c.id === id ? { ...c, checkins: [...new Set([...(c.checkins||[]), today])] } : c));
+      showToast('Checked in! 💪', 'success');
+    }
+
+    function doShareScore(challenge) {
+      const p = getProgress(challenge);
+      const end = new Date(challenge.startDate); end.setDate(end.getDate() + challenge.durationDays);
+      const link = buildLink(challenge);
+      const txt = [
+        `${challenge.emoji} ${challenge.title.toUpperCase()} — Drew's Hub`,
+        `👤 ${userName}${challenge.friendName ? ' vs ' + challenge.friendName : ''}`,
+        challenge.type === 'workouts'
+          ? `✅ ${p.done}/${challenge.target} workouts complete (${p.pct}%)`
+          : `✅ ${p.done}/${p.past} days hit (${p.pct}%)`,
+        `📅 ${challenge.durationDays}-day challenge · ends ${end.toLocaleDateString('en-US',{month:'short',day:'numeric'})}`,
+        '',
+        `💪 Think you can beat me?`,
+        link
+      ].join('\n');
+      navigator.clipboard?.writeText(txt).catch(()=>{});
+      showToast('Score copied — send it! 📲', 'success');
+    }
+
+    function doInvite(challenge) {
+      const link = buildLink(challenge);
+      if (navigator.share) {
+        navigator.share({ title: challenge.title, text: `${userName} is challenging you to: ${challenge.title} — ${challenge.durationDays} days. Accept?`, url: link }).catch(()=>{});
+      } else {
+        navigator.clipboard?.writeText(link).catch(()=>{});
+        showToast('Invite link copied! 📋', 'success');
+      }
+    }
+
+    function doDelete(id) {
+      setMyChallenges(p => p.filter(c => c.id !== id));
+      showToast('Challenge removed', 'info');
+    }
+
+    const inp = { width:'100%', padding:'11px 14px', borderRadius:12, border:'1px solid rgba(255,255,255,0.12)', background:'rgba(255,255,255,0.05)', color:'#fff', fontSize:13, fontFamily:'inherit', outline:'none', marginBottom:8 };
+
+    /* ─── CREATE VIEW ─── */
+    if (cView === 'create') return (
+      <div style={{ height:'100%', overflowY:'auto', background:'#0c0c18' }}>
+        <div style={{ padding:'max(env(safe-area-inset-top),16px) 20px 40px' }}>
+          <div style={{ display:'flex', alignItems:'center', gap:12, marginBottom:24 }}>
+            <button onClick={() => setCView('list')} style={{ background:'rgba(255,255,255,0.06)', border:'none', color:'#aaa', borderRadius:10, padding:'8px 14px', cursor:'pointer', fontFamily:'inherit', fontSize:13, fontWeight:600 }}>← Back</button>
+            <div>
+              <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:10, letterSpacing:4, color:'#3a5a6a' }}>PUSH EACH OTHER</div>
+              <div style={{ fontFamily:"'Oswald',sans-serif", fontSize:22, fontWeight:700, color:'#fff', lineHeight:1 }}>NEW CHALLENGE</div>
+            </div>
+          </div>
+
+          <div style={{ fontSize:10, color:'#4a6a7a', letterSpacing:1, marginBottom:10 }}>CHALLENGE TYPE</div>
+          <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:8, marginBottom:20 }}>
+            {CTYPES.map(t => (
+              <button key={t.id} onClick={() => { setCType(t.id); setCTargetVal(String(t.defaultT)); }} style={{ padding:'12px 6px', borderRadius:14, border:`2px solid ${cType===t.id?accentColor:'rgba(255,255,255,0.08)'}`, background:cType===t.id?`${accentColor}18`:'rgba(255,255,255,0.03)', color:'#fff', cursor:'pointer', textAlign:'center', transition:'all 0.15s' }}>
+                <div style={{ fontSize:22, marginBottom:4 }}>{t.emoji}</div>
+                <div style={{ fontSize:10, fontFamily:"'Oswald',sans-serif", fontWeight:700, color:cType===t.id?accentColor:'#aaa', letterSpacing:0.3 }}>{t.label.toUpperCase()}</div>
+                <div style={{ fontSize:9, color:'#555', marginTop:2 }}>{t.hint}</div>
+              </button>
+            ))}
+          </div>
+
+          <div style={{ fontSize:10, color:'#4a6a7a', letterSpacing:1, marginBottom:8 }}>CHALLENGE TITLE</div>
+          <input value={cTitleVal} onChange={e => setCTitleVal(e.target.value)} placeholder={`e.g. ${ct.label} Challenge`} style={inp} />
+
+          {cType !== 'custom' && (
+            <>
+              <div style={{ fontSize:10, color:'#4a6a7a', letterSpacing:1, marginBottom:8 }}>TARGET {ct.unit ? `(${ct.unit})` : ''}</div>
+              <input type="number" value={cTargetVal} onChange={e => setCTargetVal(e.target.value)} placeholder={String(ct.defaultT)} style={{ ...inp, fontSize:24, fontFamily:"'Bebas Neue',sans-serif", textAlign:'center', letterSpacing:1 }} />
+            </>
+          )}
+
+          <div style={{ fontSize:10, color:'#4a6a7a', letterSpacing:1, marginBottom:10 }}>DURATION</div>
+          <div style={{ display:'flex', gap:8, marginBottom:20 }}>
+            {[['3','3\nDAYS'],['7','1\nWEEK'],['14','2\nWEEKS'],['30','1\nMONTH']].map(([v,l]) => (
+              <button key={v} onClick={() => setCDaysVal(v)} style={{ flex:1, padding:'12px 4px', borderRadius:14, border:`2px solid ${cDaysVal===v?accentColor:'rgba(255,255,255,0.1)'}`, background:cDaysVal===v?`${accentColor}18`:'transparent', color:cDaysVal===v?accentColor:'#aaa', cursor:'pointer', fontFamily:"'Bebas Neue',sans-serif", fontSize:14, lineHeight:1.2, whiteSpace:'pre', transition:'all 0.15s' }}>{l}</button>
+            ))}
+          </div>
+
+          <div style={{ fontSize:10, color:'#4a6a7a', letterSpacing:1, marginBottom:8 }}>FRIEND'S NAME <span style={{ color:'#333' }}>(optional)</span></div>
+          <input value={cFriend} onChange={e => setCFriend(e.target.value)} placeholder="Who are you challenging?" style={inp} />
+
+          <button onClick={doCreate} style={{ width:'100%', padding:16, borderRadius:16, border:'none', background:accentColor, color:'#000', fontFamily:"'Oswald',sans-serif", fontSize:18, fontWeight:800, cursor:'pointer', letterSpacing:1, marginTop:8 }}>
+            🎯 CREATE &amp; GET INVITE LINK
+          </button>
+        </div>
+      </div>
+    );
+
+    /* ─── LIST VIEW ─── */
+    return (
+      <div style={{ height:'100%', display:'flex', flexDirection:'column', background:'#0c0c18' }}>
+        {/* Header */}
+        <div style={{ padding:'max(env(safe-area-inset-top),16px) 20px 12px', flexShrink:0, background:`linear-gradient(160deg,${accentColor}15 0%,#0c0c18 80%)` }}>
+          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:4 }}>
+            <div>
+              <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:11, letterSpacing:4, color:'#3a5a6a' }}>PUSH EACH OTHER</div>
+              <div style={{ fontFamily:"'Oswald',sans-serif", fontSize:30, fontWeight:700, color:'#fff', lineHeight:1 }}>CHALLENGES</div>
+            </div>
+            <button onClick={() => { setCView('create'); setCreatedLink(null); setCTitleVal(''); setCFriend(''); setCTargetVal(String(CTYPES[0].defaultT)); setCType('protein'); }} style={{ padding:'10px 18px', borderRadius:14, border:`1px solid ${accentColor}50`, background:`${accentColor}18`, color:accentColor, fontFamily:"'Oswald',sans-serif", fontSize:14, fontWeight:700, cursor:'pointer', letterSpacing:0.5 }}>+ NEW</button>
+          </div>
+
+          {/* Created link banner */}
+          {createdLink && (
+            <div className="pop" style={{ background:`${accentColor}14`, border:`1px solid ${accentColor}40`, borderRadius:14, padding:'12px 14px', marginTop:10 }}>
+              <div style={{ fontSize:12, color:accentColor, fontWeight:700, marginBottom:6 }}>🔗 Challenge link ready — send it!</div>
+              <div style={{ display:'flex', gap:8 }}>
+                <button onClick={() => { navigator.clipboard?.writeText(createdLink).catch(()=>{}); showToast('Copied! 📋','success'); }} style={{ flex:1, padding:'9px', borderRadius:10, border:`1px solid ${accentColor}50`, background:`${accentColor}18`, color:accentColor, fontFamily:"'Oswald',sans-serif", fontSize:12, fontWeight:700, cursor:'pointer' }}>📋 COPY LINK</button>
+                {navigator.share && <button onClick={() => navigator.share({ title:'Hub Challenge', text:`${userName} challenged you!`, url:createdLink }).catch(()=>{})} style={{ flex:1, padding:'9px', borderRadius:10, border:'1px solid rgba(74,158,255,0.45)', background:'rgba(74,158,255,0.1)', color:'#4A9EFF', fontFamily:"'Oswald',sans-serif", fontSize:12, fontWeight:700, cursor:'pointer' }}>📤 SHARE</button>}
+                <button onClick={() => setCreatedLink(null)} style={{ padding:'9px 12px', borderRadius:10, border:'1px solid rgba(255,255,255,0.1)', background:'transparent', color:'#555', cursor:'pointer', fontSize:13 }}>✕</button>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div style={{ flex:1, overflowY:'auto', padding:'12px 20px', paddingBottom:40 }}>
+          {myChallenges.length === 0 ? (
+            <div style={{ textAlign:'center', paddingTop:50 }}>
+              <div style={{ fontSize:68, marginBottom:16 }}>🏆</div>
+              <div style={{ fontFamily:"'Oswald',sans-serif", fontSize:22, fontWeight:700, color:'#fff', marginBottom:8 }}>NO ACTIVE CHALLENGES</div>
+              <div style={{ fontSize:13, color:'#4a6a7a', marginBottom:28, lineHeight:1.6, maxWidth:280, margin:'0 auto 28px' }}>
+                Challenge a friend — share a link and race to crush your goals together. Progress auto-tracks from your logs.
+              </div>
+              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10, marginBottom:20, textAlign:'left' }}>
+                {[
+                  { emoji:'💪', title:'Protein War', desc:'Who hits protein goal more days' },
+                  { emoji:'🏋️', title:'Gym Grind',   desc:'Most workouts in 30 days' },
+                  { emoji:'🔥', title:'Calorie Club', desc:'Stay in range every day' },
+                  { emoji:'💰', title:'Budget Boss',  desc:'Stay under grocery budget' },
+                ].map(t => (
+                  <div key={t.title} onClick={() => setCView('create')} style={{ background:'rgba(255,255,255,0.03)', borderRadius:14, padding:'12px 12px', border:'1px solid rgba(255,255,255,0.06)', cursor:'pointer' }}>
+                    <div style={{ fontSize:22, marginBottom:4 }}>{t.emoji}</div>
+                    <div style={{ fontSize:12, color:'#ddd', fontWeight:700 }}>{t.title}</div>
+                    <div style={{ fontSize:10, color:'#555', marginTop:2 }}>{t.desc}</div>
+                  </div>
+                ))}
+              </div>
+              <button onClick={() => setCView('create')} style={{ padding:'14px 32px', borderRadius:16, border:'none', background:accentColor, color:'#000', fontFamily:"'Oswald',sans-serif", fontSize:16, fontWeight:800, cursor:'pointer', letterSpacing:0.5 }}>START A CHALLENGE →</button>
+            </div>
+          ) : myChallenges.slice().reverse().map(challenge => {
+            const p = getProgress(challenge);
+            const endDate = new Date(challenge.startDate); endDate.setDate(endDate.getDate() + challenge.durationDays);
+            const isOver  = new Date() > endDate;
+            const daysLeft = Math.max(0, Math.ceil((endDate - new Date()) / 86400000));
+            const todayISO = isoDate(new Date());
+            const todayDone = p.days.find(d => d.dateStr === todayISO)?.status === 'done';
+            const showCheckin = challenge.type === 'custom' && !todayDone && !isOver;
+            const scoreColor = p.pct >= 75 ? accentColor : p.pct >= 45 ? '#F59E0B' : '#FF6B4A';
+
+            return (
+              <div key={challenge.id} className="pop" style={{ background:'rgba(255,255,255,0.03)', borderRadius:20, padding:16, marginBottom:14, border:`1px solid ${isOver && p.pct >= 70 ? accentColor+'50' : 'rgba(255,255,255,0.06)'}` }}>
+                {/* Card header */}
+                <div style={{ display:'flex', gap:12, alignItems:'flex-start', marginBottom:12 }}>
+                  <div style={{ width:48, height:48, borderRadius:14, background:`${accentColor}18`, border:`1px solid ${accentColor}30`, display:'flex', alignItems:'center', justifyContent:'center', fontSize:24, flexShrink:0 }}>{challenge.emoji}</div>
+                  <div style={{ flex:1, minWidth:0 }}>
+                    <div style={{ fontFamily:"'Oswald',sans-serif", fontSize:16, fontWeight:700, color:'#fff', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{challenge.title}</div>
+                    {challenge.friendName && <div style={{ fontSize:11, color:'#4a6a7a', marginTop:1 }}>⚔️ vs <span style={{ color:accentColor }}>{challenge.friendName}</span></div>}
+                    <div style={{ fontSize:10, color:isOver?'#555':'#4a6a7a', marginTop:2 }}>{isOver ? '✅ FINISHED' : `⏳ ${daysLeft} day${daysLeft!==1?'s':''} left`}</div>
+                  </div>
+                  {/* Score circle */}
+                  <div style={{ textAlign:'center', flexShrink:0 }}>
+                    <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:30, color:scoreColor, lineHeight:1 }}>{p.pct}%</div>
+                    <div style={{ fontSize:9, color:'#555', letterSpacing:0.5 }}>{p.isCount ? `${p.done}/${challenge.target}` : `${p.done}/${p.past}d`}</div>
+                  </div>
+                </div>
+
+                {/* Progress bar */}
+                <div style={{ height:6, borderRadius:3, background:'rgba(255,255,255,0.07)', overflow:'hidden', marginBottom:12 }}>
+                  <div style={{ height:'100%', borderRadius:3, background:scoreColor, width:`${p.pct}%`, transition:'width 0.5s ease' }} />
+                </div>
+
+                {/* Day dots grid */}
+                <div style={{ display:'flex', flexWrap:'wrap', gap:5, marginBottom:12 }}>
+                  {p.days.map((day, i) => {
+                    const s = day.status;
+                    const bg = s==='done' ? accentColor : s==='miss' ? 'rgba(255,107,74,0.6)' : s==='over' ? '#F59E0B' : 'rgba(255,255,255,0.07)';
+                    const isToday = day.dateStr === todayISO;
+                    return (
+                      <div key={i} title={day.dateStr} style={{ width:22, height:22, borderRadius:7, background:bg, display:'flex', alignItems:'center', justifyContent:'center', fontSize:10, color:s==='done'?'#000':'rgba(255,255,255,0.6)', boxShadow:isToday?`0 0 0 2px ${accentColor}`:'none', transition:'all 0.2s' }}>
+                        {s==='done'?'✓':s==='miss'?'✗':s==='over'?'↑':''}
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Legend */}
+                <div style={{ display:'flex', gap:12, marginBottom:12, flexWrap:'wrap' }}>
+                  {[['done',accentColor,'Hit'],['miss','rgba(255,107,74,0.8)','Miss'],['future','rgba(255,255,255,0.15)','Ahead']].map(([s,c,l]) => (
+                    <div key={s} style={{ display:'flex', alignItems:'center', gap:4, fontSize:9, color:'#555' }}>
+                      <div style={{ width:8, height:8, borderRadius:3, background:c }} />
+                      {l}
+                    </div>
+                  ))}
+                </div>
+
+                {/* Action row */}
+                <div style={{ display:'flex', gap:7, flexWrap:'wrap' }}>
+                  {showCheckin && (
+                    <button onClick={() => doCheckIn(challenge.id)} style={{ flex:'1 1 120px', padding:'9px 6px', borderRadius:11, border:`1px solid ${accentColor}50`, background:`${accentColor}18`, color:accentColor, fontFamily:"'Oswald',sans-serif", fontSize:11, fontWeight:700, cursor:'pointer', letterSpacing:0.3 }}>
+                      ✓ CHECK IN TODAY
+                    </button>
+                  )}
+                  <button onClick={() => doShareScore(challenge)} style={{ flex:'1 1 90px', padding:'9px 6px', borderRadius:11, border:'1px solid rgba(74,158,255,0.4)', background:'rgba(74,158,255,0.08)', color:'#4A9EFF', fontFamily:"'Oswald',sans-serif", fontSize:11, fontWeight:700, cursor:'pointer', letterSpacing:0.3 }}>
+                    📊 MY SCORE
+                  </button>
+                  <button onClick={() => doInvite(challenge)} style={{ flex:'1 1 90px', padding:'9px 6px', borderRadius:11, border:'1px solid rgba(168,85,247,0.4)', background:'rgba(168,85,247,0.08)', color:'#A855F7', fontFamily:"'Oswald',sans-serif", fontSize:11, fontWeight:700, cursor:'pointer', letterSpacing:0.3 }}>
+                    🔗 INVITE
+                  </button>
+                  <button onClick={() => doDelete(challenge.id)} style={{ padding:'9px 11px', borderRadius:11, border:'1px solid rgba(255,80,80,0.2)', background:'transparent', color:'rgba(255,80,80,0.45)', cursor:'pointer', fontSize:13 }}>🗑</button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
       </div>
     );
   }
@@ -2759,13 +3110,14 @@ After searching, reply with ONLY a valid JSON array, no markdown:
       <div style={{ height: 'env(safe-area-inset-top)', background: '#0c0c18', flexShrink: 0 }} />
 
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-        {screen === 'home'    && HomeScreen()}
-        {screen === 'log'     && LoggerScreen()}
-        {screen === 'train'   && WorkoutScreen()}
-        {screen === 'cook'    && CookbookScreen()}
-        {screen === 'plan'    && PlannerScreen()}
-        {screen === 'shop'    && ShoppingScreen()}
-        {screen === 'profile' && ProfileScreen()}
+        {screen === 'home'       && HomeScreen()}
+        {screen === 'log'        && LoggerScreen()}
+        {screen === 'train'      && WorkoutScreen()}
+        {screen === 'cook'       && CookbookScreen()}
+        {screen === 'plan'       && PlannerScreen()}
+        {screen === 'shop'       && ShoppingScreen()}
+        {screen === 'profile'    && ProfileScreen()}
+        {screen === 'challenges' && ChallengesScreen()}
       </div>
 
       <div style={{ display: 'flex', background: 'rgba(10,10,20,0.98)', borderTop: '1px solid rgba(255,255,255,0.06)', paddingBottom: 'max(env(safe-area-inset-bottom),4px)', flexShrink: 0 }}>
@@ -2799,13 +3151,56 @@ After searching, reply with ONLY a valid JSON array, no markdown:
 
       {showBarcode && <BarcodeScanner onScan={handleBarcodeScan} onClose={() => setShowBarcode(false)} />}
       {showSettings && SettingsModal()}
+
+      {/* ── PENDING CHALLENGE MODAL ── */}
+      {pendingChallenge && (
+        <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.88)', zIndex:700, display:'flex', alignItems:'center', justifyContent:'center', padding:24 }}>
+          <div className="pop" style={{ width:'100%', maxWidth:360, background:'#111520', borderRadius:24, padding:28, border:`2px solid ${accentColor}50`, boxShadow:`0 0 60px ${accentColor}25` }}>
+            <div style={{ textAlign:'center', marginBottom:20 }}>
+              <div style={{ fontSize:52, marginBottom:10 }}>{pendingChallenge.emoji || '🏆'}</div>
+              <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:11, letterSpacing:4, color:accentColor, marginBottom:6 }}>CHALLENGE INCOMING</div>
+              <div style={{ fontFamily:"'Oswald',sans-serif", fontSize:22, fontWeight:700, color:'#fff' }}>{pendingChallenge.title}</div>
+              {pendingChallenge.inviterName && (
+                <div style={{ fontSize:13, color:'#4a6a7a', marginTop:6 }}>from <span style={{ color:accentColor, fontWeight:700 }}>{pendingChallenge.inviterName}</span></div>
+              )}
+            </div>
+            <div style={{ background:'rgba(255,255,255,0.04)', borderRadius:14, padding:'14px 16px', marginBottom:20 }}>
+              {[
+                { label:'Type',     value: pendingChallenge.type?.charAt(0).toUpperCase() + (pendingChallenge.type?.slice(1)||'') },
+                { label:'Target',   value: pendingChallenge.type==='custom' ? 'Your call' : `${pendingChallenge.target} ${pendingChallenge.type==='calories'?'kcal':pendingChallenge.type==='budget'?'$/wk':'per day'}` },
+                { label:'Duration', value: `${pendingChallenge.durationDays} days` },
+                { label:'Starts',   value: 'Today' },
+              ].map(r => (
+                <div key={r.label} style={{ display:'flex', justifyContent:'space-between', padding:'5px 0', borderTop:'1px solid rgba(255,255,255,0.04)' }}>
+                  <span style={{ fontSize:12, color:'#4a6a7a' }}>{r.label}</span>
+                  <span style={{ fontSize:12, color:'#ddd', fontWeight:700 }}>{r.value}</span>
+                </div>
+              ))}
+            </div>
+            <div style={{ display:'flex', gap:10 }}>
+              <button onClick={() => setPendingChallenge(null)} style={{ flex:1, padding:14, borderRadius:14, border:'1px solid rgba(255,255,255,0.1)', background:'transparent', color:'#aaa', fontFamily:"'Oswald',sans-serif", fontSize:15, fontWeight:700, cursor:'pointer' }}>
+                DECLINE
+              </button>
+              <button onClick={() => {
+                const accepted = { ...pendingChallenge, startDate: new Date().toISOString().split('T')[0], createdAt: Date.now(), isOwn: false, id: 'ch_' + Date.now() };
+                setMyChallenges(p => [...p, accepted]);
+                setPendingChallenge(null);
+                setScreen('challenges');
+                showToast(`Challenge accepted! Let's go 🔥`, 'success');
+              }} style={{ flex:2, padding:14, borderRadius:14, border:'none', background:accentColor, color:'#000', fontFamily:"'Oswald',sans-serif", fontSize:16, fontWeight:800, cursor:'pointer', letterSpacing:0.5 }}>
+                ⚔️ ACCEPT
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
 /* ── SERVICE WORKER ── */
 if ('serviceWorker' in navigator) {
-  const sw = `const C='drews-hub-v11';self.addEventListener('install',e=>{e.waitUntil(caches.open(C).then(c=>c.addAll(['.'])));self.skipWaiting();});self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==C).map(k=>caches.delete(k)))));self.clients.claim();});self.addEventListener('fetch',e=>{if(e.request.method!=='GET')return;const u=e.request.url;if(u.includes('api.anthropic.com')||u.includes('openfoodfacts')||u.includes('themealdb')||u.includes('fonts.googleapis')||u.includes('cdnjs'))return;e.respondWith(caches.match(e.request).then(r=>r||fetch(e.request).then(res=>{if(res&&res.ok){const cl=res.clone();caches.open(C).then(c=>c.put(e.request,cl));}return res;})));});`;
+  const sw = `const C='drews-hub-v12';self.addEventListener('install',e=>{e.waitUntil(caches.open(C).then(c=>c.addAll(['.'])));self.skipWaiting();});self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==C).map(k=>caches.delete(k)))));self.clients.claim();});self.addEventListener('fetch',e=>{if(e.request.method!=='GET')return;const u=e.request.url;if(u.includes('api.anthropic.com')||u.includes('openfoodfacts')||u.includes('themealdb')||u.includes('fonts.googleapis')||u.includes('cdnjs'))return;e.respondWith(caches.match(e.request).then(r=>r||fetch(e.request).then(res=>{if(res&&res.ok){const cl=res.clone();caches.open(C).then(c=>c.put(e.request,cl));}return res;})));});`;
   try { navigator.serviceWorker.register(URL.createObjectURL(new Blob([sw], { type: 'application/javascript' }))).catch(() => {}); } catch {}
 }
 
