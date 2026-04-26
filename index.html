@@ -1246,6 +1246,17 @@ After searching, reply with ONLY a valid JSON array, no markdown:
     });
   }
 
+  /* look up a recipe by id in saved OR the Tasty Shreds library */
+  function findRecipeById(id) {
+    return saved.find(r => r.id === id) || TASTY_SHREDS_RECIPES.find(r => r.id === id) || null;
+  }
+
+  /* all recipes available to the planner (saved + full Tasty Shreds library) */
+  function allAvailableRecipes() {
+    const savedIds = new Set(saved.map(r => r.id));
+    return [...saved, ...TASTY_SHREDS_RECIPES.filter(r => !savedIds.has(r.id))];
+  }
+
   function addToPlan(dateStr, recipe) {
     setMealPlan(p => ({ ...p, [dateStr]: [...(p[dateStr] || []), { recipeId: recipe.id, name: recipe.name, servings: 1 }] }));
     showToast(`Added to ${dayLabel(dateStr)}`, 'success');
@@ -1257,13 +1268,18 @@ After searching, reply with ONLY a valid JSON array, no markdown:
 
   async function generateMealPlan() {
     setGenLoading(true);
-    const recipeSummary = saved.slice(0, 20).map(r =>
-      `${r.name}: ${r.calories || 0}cal / ${r.protein || 0}g protein / $${estimateRecipeCost(r).toFixed(2)} per serving`
+    const dayBudget = (weekBudget / 7).toFixed(0);
+    // Build recipe pool: saved first, then budget-friendly Tasty Shreds picks
+    const pool = allAvailableRecipes()
+      .filter(r => estimateRecipeCost(r) <= weekBudget / 7 * 0.5) // each meal ≤ 50% of daily budget
+      .sort((a, b) => (estimateRecipeCost(a) - estimateRecipeCost(b)));
+    const recipeSummary = pool.slice(0, 40).map(r =>
+      `• ${r.name}: ${r.calories || 0}cal / ${r.protein || 0}g P / ~$${estimateRecipeCost(r).toFixed(2)}/srv`
     ).join('\n');
     await callClaude([{ role: 'user', content:
-      `Create a 7-day meal plan for Drew (${goal.label}: ${goal.cal} cal/day, ${goal.protein}g protein, $${weekBudget}/week budget).\n\nAvailable recipes:\n${recipeSummary || 'No saved recipes — use common high-protein budget meals'}\n\nFormat:\nDay 1: [Meal 1], [Meal 2], [Meal 3]\n...\n\nTarget ${goal.cal} calories and ${goal.protein}g protein per day. Budget $${(weekBudget / 7).toFixed(0)}/day max.`
-    }], 600);
-    showToast('Meal plan ready — add recipes to planner manually', 'success');
+      `You are a fitness meal planner. Create a 7-day meal plan for Drew:\n- Goal: ${goal.label} (${goal.cal} cal/day, ${goal.protein}g protein/day)\n- Budget: $${weekBudget}/week (~$${dayBudget}/day)\n- Night shift worker (12hr shifts), high protein priority\n\nAvailable recipes:\n${recipeSummary}\n\nRules:\n1. Stay UNDER $${dayBudget}/day\n2. Hit ${goal.protein}g protein and ~${goal.cal} calories each day\n3. Use ONLY recipes from the list above\n4. 3 meals + 1-2 snacks per day\n\nFormat each day exactly as:\nDay 1 (~$XX.XX): Breakfast: [name], Lunch: [name], Dinner: [name], Snack: [name]\n...`
+    }], 800);
+    showToast('Plan generated — tap + on any day to add those recipes!', 'success');
     setGenLoading(false);
   }
 
@@ -1272,7 +1288,7 @@ After searching, reply with ONLY a valid JSON array, no markdown:
     const items = {};
     getPlanWeekDates().forEach(d => {
       (mealPlan[d] || []).forEach(m => {
-        const recipe = saved.find(r => r.id === m.recipeId);
+        const recipe = findRecipeById(m.recipeId);
         if (!recipe) return;
         (recipe.ingredients || []).forEach(ing => {
           const ingItem = ing.item || ing.name || '';
@@ -1476,7 +1492,7 @@ After searching, reply with ONLY a valid JSON array, no markdown:
           <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 16, padding: 14, border: '1px solid rgba(255,255,255,0.06)', marginBottom: 14 }}>
             <div style={{ fontSize: 10, color: '#4a6a7a', letterSpacing: 1, marginBottom: 8 }}>TODAY'S PLAN</div>
             {todayPlan.map((m, i) => {
-              const r = saved.find(s => s.id === m.recipeId);
+              const r = findRecipeById(m.recipeId);
               return (
                 <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '7px 0', borderTop: i > 0 ? '1px solid rgba(255,255,255,0.04)' : undefined }}>
                   <div style={{ fontSize: 13, color: '#ddd' }}>{m.name}</div>
@@ -1917,9 +1933,10 @@ After searching, reply with ONLY a valid JSON array, no markdown:
     const weekLabels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
     const weekTotalCost = weekDates.reduce((tot, d) =>
       tot + (mealPlan[d] || []).reduce((s, m) => {
-        const r = saved.find(x => x.id === m.recipeId);
+        const r = findRecipeById(m.recipeId);
         return s + (r ? estimateRecipeCost(r) * (m.servings || 1) : 0);
       }, 0), 0);
+    const dayBudgetMax = weekBudget / 7;
 
     return (
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
@@ -1939,7 +1956,8 @@ After searching, reply with ONLY a valid JSON array, no markdown:
 
           {weekDates.map((d, di) => {
             const dayMeals = mealPlan[d] || [];
-            const dayCost  = dayMeals.reduce((s, m) => { const r = saved.find(x => x.id === m.recipeId); return s + (r ? estimateRecipeCost(r) * (m.servings || 1) : 0); }, 0);
+            const dayCost  = dayMeals.reduce((s, m) => { const r = findRecipeById(m.recipeId); return s + (r ? estimateRecipeCost(r) * (m.servings || 1) : 0); }, 0);
+            const overBudget = dayCost > dayBudgetMax && dayCost > 0;
             return (
               <div key={d} style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 14, padding: 12, marginBottom: 8, border: '1px solid rgba(255,255,255,0.06)' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
@@ -1948,7 +1966,7 @@ After searching, reply with ONLY a valid JSON array, no markdown:
                     <div style={{ fontSize: 10, color: '#555' }}>{d}</div>
                   </div>
                   <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                    {dayCost > 0 && <span style={{ fontSize: 10, color: '#4BDE80' }}>${dayCost.toFixed(2)}</span>}
+                    {dayCost > 0 && <span style={{ fontSize: 10, color: overBudget ? '#FF6B4A' : '#4BDE80' }}>{overBudget ? '⚠ ' : ''}${dayCost.toFixed(2)}/{`$${dayBudgetMax.toFixed(0)}`}</span>}
                     <button onClick={() => setAddToDay(addToDay === d ? null : d)} style={{ width: 22, height: 22, borderRadius: 6, border: '1px solid rgba(255,255,255,0.15)', background: 'rgba(255,255,255,0.05)', color: '#aaa', cursor: 'pointer', fontSize: 14, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>+</button>
                   </div>
                 </div>
@@ -1958,18 +1976,26 @@ After searching, reply with ONLY a valid JSON array, no markdown:
                     <button onClick={() => removeFromPlan(d, mi)} style={{ width: 18, height: 18, borderRadius: 4, border: 'none', background: 'rgba(255,255,255,0.06)', color: '#666', cursor: 'pointer', fontSize: 10 }}>✕</button>
                   </div>
                 ))}
-                {addToDay === d && (
-                  <div style={{ marginTop: 8, background: 'rgba(0,0,0,0.4)', borderRadius: 10, padding: 8, maxHeight: 160, overflowY: 'auto' }}>
-                    {saved.length === 0
-                      ? <div style={{ fontSize: 11, color: '#555' }}>Save recipes in Cookbook first</div>
-                      : saved.map(r => (
-                        <div key={r.id} onClick={() => { addToPlan(d, r); setAddToDay(null); }} style={{ padding: '7px 0', fontSize: 12, color: '#aaa', cursor: 'pointer', borderBottom: '1px solid rgba(255,255,255,0.04)', display: 'flex', justifyContent: 'space-between' }}>
-                          <span>{r.name}</span>
-                          <span style={{ color: '#4BDE80', fontSize: 10 }}>${estimateRecipeCost(r).toFixed(2)}</span>
-                        </div>
-                      ))}
-                  </div>
-                )}
+                {addToDay === d && (() => {
+                  const plannerPool = allAvailableRecipes()
+                    .sort((a, b) => estimateRecipeCost(a) - estimateRecipeCost(b));
+                  return (
+                    <div style={{ marginTop: 8, background: 'rgba(0,0,0,0.5)', borderRadius: 10, padding: '6px 8px', maxHeight: 200, overflowY: 'auto' }}>
+                      <div style={{ fontSize: 9, color: '#444', letterSpacing: 1, marginBottom: 6 }}>TAP TO ADD · SORTED BY COST · BUDGET ${dayBudgetMax.toFixed(0)}/DAY</div>
+                      {plannerPool.map(r => {
+                        const cost = estimateRecipeCost(r);
+                        const wouldExceed = dayCost + cost > dayBudgetMax * 1.1;
+                        return (
+                          <div key={r.id} onClick={() => { addToPlan(d, r); setAddToDay(null); }}
+                            style={{ padding: '7px 4px', fontSize: 12, color: wouldExceed ? '#888' : '#ddd', cursor: 'pointer', borderBottom: '1px solid rgba(255,255,255,0.04)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+                            <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.name}</span>
+                            <span style={{ fontSize: 10, color: wouldExceed ? '#FF6B4A' : '#4BDE80', flexShrink: 0 }}>${cost.toFixed(2)}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })()}
               </div>
             );
           })}
@@ -2270,7 +2296,7 @@ After searching, reply with ONLY a valid JSON array, no markdown:
 
 /* ── SERVICE WORKER ── */
 if ('serviceWorker' in navigator) {
-  const sw = `const C='drews-hub-v9';self.addEventListener('install',e=>{e.waitUntil(caches.open(C).then(c=>c.addAll(['.'])));self.skipWaiting();});self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==C).map(k=>caches.delete(k)))));self.clients.claim();});self.addEventListener('fetch',e=>{if(e.request.method!=='GET')return;const u=e.request.url;if(u.includes('api.anthropic.com')||u.includes('openfoodfacts')||u.includes('themealdb')||u.includes('fonts.googleapis')||u.includes('cdnjs'))return;e.respondWith(caches.match(e.request).then(r=>r||fetch(e.request).then(res=>{if(res&&res.ok){const cl=res.clone();caches.open(C).then(c=>c.put(e.request,cl));}return res;})));});`;
+  const sw = `const C='drews-hub-v10';self.addEventListener('install',e=>{e.waitUntil(caches.open(C).then(c=>c.addAll(['.'])));self.skipWaiting();});self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==C).map(k=>caches.delete(k)))));self.clients.claim();});self.addEventListener('fetch',e=>{if(e.request.method!=='GET')return;const u=e.request.url;if(u.includes('api.anthropic.com')||u.includes('openfoodfacts')||u.includes('themealdb')||u.includes('fonts.googleapis')||u.includes('cdnjs'))return;e.respondWith(caches.match(e.request).then(r=>r||fetch(e.request).then(res=>{if(res&&res.ok){const cl=res.clone();caches.open(C).then(c=>c.put(e.request,cl));}return res;})));});`;
   try { navigator.serviceWorker.register(URL.createObjectURL(new Blob([sw], { type: 'application/javascript' }))).catch(() => {}); } catch {}
 }
 
