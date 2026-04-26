@@ -704,8 +704,15 @@ function FitnessHub() {
   const [hubWidgets,   setHubWidgets]   = useState(() => load('hubWidgets', { plan:true, macros:true, log:true, streak:true }));
   const [onboarded,    setOnboarded]    = useState(() => load('onboarded', false));
   /* ── challenges ── */
-  const [myChallenges,    setMyChallenges]    = useState(() => load('myChallenges', []));
+  const [myChallenges,     setMyChallenges]     = useState(() => load('myChallenges', []));
   const [pendingChallenge, setPendingChallenge] = useState(null);
+  /* ── firebase sync ── */
+  const [firebaseUrl, setFirebaseUrl] = useState(() => load('firebaseUrl', ''));
+  const [userId] = useState(() => {
+    let id = load('hubUserId', '');
+    if (!id) { id = 'u_' + Math.random().toString(36).slice(2, 10); save('hubUserId', id); }
+    return id;
+  });
 
   /* ── ephemeral UI ── */
   const [screen,       setScreen]       = useState('home');
@@ -782,6 +789,7 @@ function FitnessHub() {
   useEffect(() => save('hubWidgets',   hubWidgets),   [hubWidgets]);
   useEffect(() => save('onboarded',    onboarded),    [onboarded]);
   useEffect(() => save('myChallenges', myChallenges), [myChallenges]);
+  useEffect(() => save('firebaseUrl',  firebaseUrl),  [firebaseUrl]);
   /* sync settings staging state whenever the modal opens */
   useEffect(() => {
     if (showSettings) { setSKey(apiKey); setSUrl(vercelUrl); setSBudget(String(weekBudget)); setSVaultName(vaultName); }
@@ -803,11 +811,17 @@ function FitnessHub() {
       } catch {}
     }
     if (hash.startsWith('#join=')) {
-      try {
-        const c = JSON.parse(atob(hash.slice(6)));
-        setPendingChallenge(c);
-        window.history.replaceState(null, '', window.location.pathname);
-      } catch {}
+      const val = hash.slice(6);
+      window.history.replaceState(null, '', window.location.pathname);
+      if (val.startsWith('ch_')) {
+        // New format: fetch metadata from Firebase
+        fbGet(`/challenges/${val}/meta`).then(meta => {
+          if (meta) setPendingChallenge(meta);
+        });
+      } else {
+        // Old base64 fallback
+        try { setPendingChallenge(JSON.parse(atob(val))); } catch {}
+      }
     }
   }, []);
 
@@ -823,6 +837,82 @@ function FitnessHub() {
     showToast('📋 Sync link copied — bookmark it on your other devices!', 'success');
     return url;
   }
+
+  /* ════════════════════════════════════════
+     FIREBASE REALTIME DATABASE HELPERS
+  ════════════════════════════════════════ */
+  function fbBase() { return (firebaseUrl || '').replace(/\/+$/, ''); }
+  async function fbGet(path) {
+    if (!firebaseUrl) return null;
+    try { const r = await fetch(`${fbBase()}${path}.json`); return r.ok ? await r.json() : null; } catch { return null; }
+  }
+  async function fbPut(path, data) {
+    if (!firebaseUrl) return;
+    try { await fetch(`${fbBase()}${path}.json`, { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data) }); } catch {}
+  }
+  async function fbPatch(path, data) {
+    if (!firebaseUrl) return;
+    try { await fetch(`${fbBase()}${path}.json`, { method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data) }); } catch {}
+  }
+  async function fbDelete(path) {
+    if (!firebaseUrl) return;
+    try { await fetch(`${fbBase()}${path}.json`, { method:'DELETE' }); } catch {}
+  }
+
+  /* compute a single day's challenge status from local data */
+  function computeDayStatus(challenge, dateStr) {
+    const d = new Date(dateStr + 'T12:00:00');
+    const now = new Date(); now.setHours(23,59,59,0);
+    if (d > now) return 'future';
+    if (challenge.type === 'protein') {
+      const arr = load('entries_' + dateStr, []);
+      return arr.reduce((s,e) => s+(e.protein||0), 0) >= challenge.target ? 'done' : 'miss';
+    }
+    if (challenge.type === 'calories') {
+      const arr = load('entries_' + dateStr, []);
+      const t = arr.reduce((s,e) => s+(e.cal||0), 0);
+      return t > 0 && t <= challenge.target * 1.05 ? 'done' : 'miss';
+    }
+    if (challenge.type === 'streak') {
+      return load('entries_' + dateStr, []).length > 0 ? 'done' : 'miss';
+    }
+    if (challenge.type === 'workouts') {
+      return vault.some(w => { try { return new Date(w.date).toISOString().split('T')[0] === dateStr; } catch { return false; } }) ? 'done' : 'miss';
+    }
+    if (challenge.type === 'budget') {
+      const ws = new Date(dateStr+'T00:00:00'); ws.setDate(ws.getDate()-ws.getDay());
+      const we = new Date(ws); we.setDate(ws.getDate()+7);
+      const sp = grocLog.filter(g=>{const gd=new Date(g.date);return gd>=ws&&gd<we;}).reduce((s,g)=>s+(g.amount||0),0);
+      return sp <= challenge.target ? 'done' : 'over';
+    }
+    if (challenge.type === 'custom') {
+      return (challenge.checkins||[]).includes(dateStr) ? 'done' : 'miss';
+    }
+    return 'miss';
+  }
+
+  /* push ALL past days for one challenge to Firebase */
+  async function syncChallengeToFirebase(challenge) {
+    if (!firebaseUrl) return;
+    const start = new Date(challenge.startDate + 'T00:00:00');
+    const now = new Date();
+    const days = {};
+    for (let i = 0; i < challenge.durationDays; i++) {
+      const d = new Date(start); d.setDate(start.getDate() + i);
+      if (d > now) break;
+      const ds = d.toISOString().split('T')[0];
+      days[ds] = computeDayStatus(challenge, ds);
+    }
+    await fbPatch(`/challenges/${challenge.id}/participants/${userId}`, {
+      name: userName || 'You', avatar: userAvatar || '💪', updatedAt: Date.now(), days
+    });
+  }
+
+  /* auto-push whenever logged data changes */
+  useEffect(() => {
+    if (!firebaseUrl || !myChallenges.length) return;
+    myChallenges.forEach(c => syncChallengeToFirebase(c));
+  }, [entries, vault, grocLog, myChallenges.length, firebaseUrl]);
 
   /* ── computed macros ── */
   const goal      = GOAL_PRESETS[userGoal] || GOAL_PRESETS.recomp;
@@ -2178,86 +2268,94 @@ After searching, reply with ONLY a valid JSON array, no markdown:
   }
 
   /* ══════════════════════════════════════════════
-     CHALLENGES SCREEN
+     CHALLENGES SCREEN — Firebase real-time
   ══════════════════════════════════════════════ */
   function ChallengesScreen() {
-    const [cView,       setCView]       = useState('list');
-    const [cType,       setCType]       = useState('protein');
-    const [cTitleVal,   setCTitleVal]   = useState('');
-    const [cTargetVal,  setCTargetVal]  = useState('');
-    const [cDaysVal,    setCDaysVal]    = useState('7');
-    const [cFriend,     setCFriend]     = useState('');
-    const [createdLink, setCreatedLink] = useState(null);
+    const [cView,      setCView]      = useState('list');
+    const [cType,      setCType]      = useState('protein');
+    const [cTitleVal,  setCTitleVal]  = useState('');
+    const [cTargetVal, setCTargetVal] = useState('');
+    const [cDaysVal,   setCDaysVal]   = useState('7');
+    const [cFriend,    setCFriend]    = useState('');
+    const [createdLink,setCreatedLink]= useState(null);
+    const [remoteData, setRemoteData] = useState({}); // { [challengeId]: { [participantId]: {name,avatar,days} } }
+    const [syncing,    setSyncing]    = useState(false);
+    const [lastSync,   setLastSync]   = useState(null);
 
     const CTYPES = [
       { id:'protein',  emoji:'💪', label:'Protein',     unit:'g/day',    hint:`${GOAL_PRESETS[userGoal].protein}g`,  defaultT: GOAL_PRESETS[userGoal].protein },
       { id:'calories', emoji:'🔥', label:'Calories',    unit:'kcal',     hint:`${GOAL_PRESETS[userGoal].cal} kcal`, defaultT: GOAL_PRESETS[userGoal].cal },
       { id:'workouts', emoji:'🏋️', label:'Workouts',    unit:'sessions', hint:'Complete X sessions',                 defaultT: 5 },
-      { id:'streak',   emoji:'📅', label:'Log Streak',  unit:'days',     hint:'Log food X days in a row',           defaultT: 7 },
+      { id:'streak',   emoji:'📅', label:'Log Streak',  unit:'days',     hint:'Log food X days straight',           defaultT: 7 },
       { id:'budget',   emoji:'💰', label:'Budget Boss', unit:'$/week',   hint:`$${weekBudget}/wk`,                  defaultT: weekBudget },
-      { id:'custom',   emoji:'🎯', label:'Custom',      unit:'',         hint:'Your rules, your call',              defaultT: '' },
+      { id:'custom',   emoji:'🎯', label:'Custom',      unit:'',         hint:'Your rules, daily check-in',         defaultT: '' },
     ];
     const ct = CTYPES.find(t => t.id === cType) || CTYPES[0];
 
-    function isoDate(d) { return d.toISOString().split('T')[0]; }
-
-    function getDayStatus(challenge, dateStr) {
-      const d = new Date(dateStr + 'T12:00:00');
-      const now = new Date(); now.setHours(23,59,59,0);
-      if (d > now) return 'future';
-      const type = challenge.type;
-      if (type === 'protein') {
-        const arr = load('entries_' + dateStr, []);
-        return arr.reduce((s,e) => s+(e.protein||0), 0) >= challenge.target ? 'done' : 'miss';
+    /* ── fetch all participants for all active challenges ── */
+    async function fetchAll() {
+      if (!firebaseUrl || !myChallenges.length) return;
+      setSyncing(true);
+      const updates = {};
+      for (const c of myChallenges) {
+        const parts = await fbGet(`/challenges/${c.id}/participants`);
+        if (parts) updates[c.id] = parts;
       }
-      if (type === 'calories') {
-        const arr = load('entries_' + dateStr, []);
-        const total = arr.reduce((s,e) => s+(e.cal||0), 0);
-        return total > 0 && total <= challenge.target * 1.05 ? 'done' : total === 0 ? 'miss' : 'over';
-      }
-      if (type === 'streak') {
-        const arr = load('entries_' + dateStr, []);
-        return arr.length > 0 ? 'done' : 'miss';
-      }
-      if (type === 'workouts') {
-        const has = vault.some(w => { try { return isoDate(new Date(w.date)) === dateStr; } catch { return false; } });
-        return has ? 'done' : 'miss';
-      }
-      if (type === 'budget') {
-        const weekStart = new Date(dateStr + 'T00:00:00');
-        weekStart.setDate(weekStart.getDate() - weekStart.getDay());
-        const weekEnd = new Date(weekStart); weekEnd.setDate(weekStart.getDate() + 7);
-        const spend = grocLog.filter(g => { const gd = new Date(g.date); return gd >= weekStart && gd < weekEnd; }).reduce((s,g) => s+(g.amount||0), 0);
-        return spend <= challenge.target ? 'done' : 'over';
-      }
-      if (type === 'custom') {
-        return (challenge.checkins||[]).includes(dateStr) ? 'done' : 'miss';
-      }
-      return 'miss';
+      setRemoteData(updates);
+      setLastSync(new Date());
+      setSyncing(false);
     }
 
-    function getProgress(challenge) {
+    useEffect(() => {
+      fetchAll();
+      const t = setInterval(fetchAll, 20000); // auto-refresh every 20s
+      return () => clearInterval(t);
+    }, [myChallenges.length, firebaseUrl]);
+
+    /* ── leaderboard for one challenge (merges remote + local) ── */
+    function getLeaderboard(challenge) {
+      const parts = remoteData[challenge.id] || {};
       const start = new Date(challenge.startDate + 'T00:00:00');
-      const days = [];
-      for (let i = 0; i < challenge.durationDays; i++) {
-        const d = new Date(start); d.setDate(start.getDate() + i);
-        days.push({ dateStr: isoDate(d), status: getDayStatus(challenge, isoDate(d)) });
+      const entries = Object.entries(parts).map(([pid, pdata]) => {
+        const isMe = pid === userId;
+        const days = [];
+        for (let i = 0; i < challenge.durationDays; i++) {
+          const d = new Date(start); d.setDate(start.getDate() + i);
+          const ds = d.toISOString().split('T')[0];
+          const status = isMe ? computeDayStatus(challenge, ds) : ((pdata.days || {})[ds] || (new Date(ds+'T12:00:00') > new Date() ? 'future' : 'miss'));
+          days.push({ ds, status });
+        }
+        const done = days.filter(d => d.status === 'done').length;
+        const past = days.filter(d => d.status !== 'future').length;
+        return {
+          pid, isMe,
+          name:   isMe ? (userName || 'You')       : (pdata.name   || 'Friend'),
+          avatar: isMe ? (userAvatar || '💪')       : (pdata.avatar || '💪'),
+          days, done, past,
+          pct: past > 0 ? Math.round(done / Math.max(past,1) * 100) : 0,
+          updatedAt: pdata.updatedAt || 0,
+        };
+      });
+      // If nobody is in Firebase yet, add local "me" row
+      if (!parts[userId]) {
+        const myDays = [];
+        for (let i = 0; i < challenge.durationDays; i++) {
+          const d = new Date(start); d.setDate(start.getDate() + i);
+          const ds = d.toISOString().split('T')[0];
+          myDays.push({ ds, status: computeDayStatus(challenge, ds) });
+        }
+        const done = myDays.filter(d => d.status === 'done').length;
+        const past = myDays.filter(d => d.status !== 'future').length;
+        entries.unshift({ pid: userId, isMe: true, name: userName || 'You', avatar: userAvatar || '💪', days: myDays, done, past, pct: past > 0 ? Math.round(done/Math.max(past,1)*100) : 0, updatedAt: 0 });
       }
-      if (challenge.type === 'workouts') {
-        const done = vault.filter(w => { try { return new Date(w.date) >= start; } catch { return false; } }).length;
-        const pct  = Math.min(Math.round(done / Math.max(challenge.target,1) * 100), 100);
-        return { days, done, past: challenge.durationDays, total: challenge.target, pct, isCount: true };
-      }
-      const done = days.filter(d => d.status === 'done').length;
-      const past = days.filter(d => d.status !== 'future').length;
-      return { days, done, past, total: challenge.durationDays, pct: past > 0 ? Math.round(done / Math.max(past,1) * 100) : 0 };
+      return entries.sort((a,b) => b.pct - a.pct);
     }
 
     function buildLink(challenge) {
-      try { return `${location.origin}${location.pathname}#join=${btoa(JSON.stringify({ ...challenge, inviterName: userName }))}`;} catch { return ''; }
+      return `${location.origin}${location.pathname}#join=${challenge.id}`;
     }
 
-    function doCreate() {
+    async function doCreate() {
       const typeObj = CTYPES.find(t => t.id === cType);
       const challenge = {
         id: 'ch_' + Date.now(),
@@ -2268,60 +2366,67 @@ After searching, reply with ONLY a valid JSON array, no markdown:
         durationDays: parseInt(cDaysVal) || 7,
         friendName: cFriend.trim(),
         createdBy: userName,
-        startDate: isoDate(new Date()),
+        startDate: new Date().toISOString().split('T')[0],
         createdAt: Date.now(),
         checkins: [],
         isOwn: true,
       };
       setMyChallenges(p => [...p, challenge]);
+      // Push metadata + creator's participant slot to Firebase
+      if (firebaseUrl) {
+        await fbPut(`/challenges/${challenge.id}/meta`, {
+          id: challenge.id, type: challenge.type, title: challenge.title,
+          emoji: challenge.emoji, target: challenge.target,
+          durationDays: challenge.durationDays, startDate: challenge.startDate,
+          createdBy: userName, createdAt: challenge.createdAt,
+        });
+        await syncChallengeToFirebase(challenge);
+      }
       const link = buildLink(challenge);
       setCreatedLink(link);
       setCView('list');
-      showToast('Challenge created! 🎯', 'success');
-      if (cFriend && navigator.share) navigator.share({ title: challenge.title, text: `${userName} is challenging you!`, url: link }).catch(()=>{});
+      showToast('Challenge created! Share the link 🎯', 'success');
     }
 
     function doCheckIn(id) {
-      const today = isoDate(new Date());
+      const today = new Date().toISOString().split('T')[0];
       setMyChallenges(p => p.map(c => c.id === id ? { ...c, checkins: [...new Set([...(c.checkins||[]), today])] } : c));
       showToast('Checked in! 💪', 'success');
     }
 
-    function doShareScore(challenge) {
-      const p = getProgress(challenge);
-      const end = new Date(challenge.startDate); end.setDate(end.getDate() + challenge.durationDays);
-      const link = buildLink(challenge);
-      const txt = [
-        `${challenge.emoji} ${challenge.title.toUpperCase()} — Drew's Hub`,
-        `👤 ${userName}${challenge.friendName ? ' vs ' + challenge.friendName : ''}`,
-        challenge.type === 'workouts'
-          ? `✅ ${p.done}/${challenge.target} workouts complete (${p.pct}%)`
-          : `✅ ${p.done}/${p.past} days hit (${p.pct}%)`,
-        `📅 ${challenge.durationDays}-day challenge · ends ${end.toLocaleDateString('en-US',{month:'short',day:'numeric'})}`,
-        '',
-        `💪 Think you can beat me?`,
-        link
-      ].join('\n');
-      navigator.clipboard?.writeText(txt).catch(()=>{});
-      showToast('Score copied — send it! 📲', 'success');
+    async function doDelete(id) {
+      setMyChallenges(p => p.filter(c => c.id !== id));
+      if (firebaseUrl) await fbDelete(`/challenges/${id}/participants/${userId}`);
+      showToast('Challenge removed', 'info');
     }
 
     function doInvite(challenge) {
       const link = buildLink(challenge);
       if (navigator.share) {
-        navigator.share({ title: challenge.title, text: `${userName} is challenging you to: ${challenge.title} — ${challenge.durationDays} days. Accept?`, url: link }).catch(()=>{});
+        navigator.share({ title: challenge.title, text: `${userName} is challenging you: ${challenge.title} (${challenge.durationDays} days). Accept?`, url: link }).catch(()=>{});
       } else {
         navigator.clipboard?.writeText(link).catch(()=>{});
         showToast('Invite link copied! 📋', 'success');
       }
     }
 
-    function doDelete(id) {
-      setMyChallenges(p => p.filter(c => c.id !== id));
-      showToast('Challenge removed', 'info');
-    }
-
     const inp = { width:'100%', padding:'11px 14px', borderRadius:12, border:'1px solid rgba(255,255,255,0.12)', background:'rgba(255,255,255,0.05)', color:'#fff', fontSize:13, fontFamily:'inherit', outline:'none', marginBottom:8 };
+
+    /* ─── NO FIREBASE BANNER ─── */
+    function NoFirebaseBanner() {
+      return (
+        <div style={{ background:'rgba(255,107,74,0.08)', border:'1px solid rgba(255,107,74,0.25)', borderRadius:14, padding:'14px 16px', marginBottom:16 }}>
+          <div style={{ fontSize:12, color:'#FF6B4A', fontWeight:700, marginBottom:6 }}>⚡ Real-time sync not connected</div>
+          <div style={{ fontSize:11, color:'#aaa', lineHeight:1.5, marginBottom:10 }}>
+            To see friends' progress live, add a Firebase Database URL in <span style={{ color:accentColor, fontWeight:700 }}>Profile → App → Firebase URL</span>.{'\n'}
+            Takes 2 minutes — completely free.
+          </div>
+          <button onClick={() => setScreen('profile')} style={{ padding:'7px 14px', borderRadius:9, border:`1px solid ${accentColor}50`, background:`${accentColor}18`, color:accentColor, fontFamily:"'Oswald',sans-serif", fontSize:11, fontWeight:700, cursor:'pointer' }}>
+            GO TO SETTINGS →
+          </button>
+        </div>
+      );
+    }
 
     /* ─── CREATE VIEW ─── */
     if (cView === 'create') return (
@@ -2352,7 +2457,7 @@ After searching, reply with ONLY a valid JSON array, no markdown:
           {cType !== 'custom' && (
             <>
               <div style={{ fontSize:10, color:'#4a6a7a', letterSpacing:1, marginBottom:8 }}>TARGET {ct.unit ? `(${ct.unit})` : ''}</div>
-              <input type="number" value={cTargetVal} onChange={e => setCTargetVal(e.target.value)} placeholder={String(ct.defaultT)} style={{ ...inp, fontSize:24, fontFamily:"'Bebas Neue',sans-serif", textAlign:'center', letterSpacing:1 }} />
+              <input type="number" value={cTargetVal} onChange={e => setCTargetVal(e.target.value)} placeholder={String(ct.defaultT)} style={{ ...inp, fontSize:26, fontFamily:"'Bebas Neue',sans-serif", textAlign:'center', letterSpacing:1 }} />
             </>
           )}
 
@@ -2377,45 +2482,46 @@ After searching, reply with ONLY a valid JSON array, no markdown:
     return (
       <div style={{ height:'100%', display:'flex', flexDirection:'column', background:'#0c0c18' }}>
         {/* Header */}
-        <div style={{ padding:'max(env(safe-area-inset-top),16px) 20px 12px', flexShrink:0, background:`linear-gradient(160deg,${accentColor}15 0%,#0c0c18 80%)` }}>
+        <div style={{ padding:'max(env(safe-area-inset-top),14px) 20px 12px', flexShrink:0, background:`linear-gradient(160deg,${accentColor}15 0%,#0c0c18 80%)` }}>
           <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:4 }}>
             <div>
               <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:11, letterSpacing:4, color:'#3a5a6a' }}>PUSH EACH OTHER</div>
-              <div style={{ fontFamily:"'Oswald',sans-serif", fontSize:30, fontWeight:700, color:'#fff', lineHeight:1 }}>CHALLENGES</div>
+              <div style={{ fontFamily:"'Oswald',sans-serif", fontSize:28, fontWeight:700, color:'#fff', lineHeight:1 }}>CHALLENGES</div>
             </div>
-            <button onClick={() => { setCView('create'); setCreatedLink(null); setCTitleVal(''); setCFriend(''); setCTargetVal(String(CTYPES[0].defaultT)); setCType('protein'); }} style={{ padding:'10px 18px', borderRadius:14, border:`1px solid ${accentColor}50`, background:`${accentColor}18`, color:accentColor, fontFamily:"'Oswald',sans-serif", fontSize:14, fontWeight:700, cursor:'pointer', letterSpacing:0.5 }}>+ NEW</button>
+            <div style={{ display:'flex', gap:8, alignItems:'center' }}>
+              {firebaseUrl && (
+                <button onClick={fetchAll} style={{ padding:'7px 10px', borderRadius:10, border:`1px solid ${accentColor}30`, background:'transparent', color:syncing?accentColor:'#3a5a6a', cursor:'pointer', fontSize:13 }}>{syncing ? '⟳' : '↻'}</button>
+              )}
+              <button onClick={() => { setCView('create'); setCreatedLink(null); setCTitleVal(''); setCFriend(''); setCTargetVal(String(CTYPES[0].defaultT)); setCType('protein'); }} style={{ padding:'10px 16px', borderRadius:14, border:`1px solid ${accentColor}50`, background:`${accentColor}18`, color:accentColor, fontFamily:"'Oswald',sans-serif", fontSize:13, fontWeight:700, cursor:'pointer' }}>+ NEW</button>
+            </div>
           </div>
+          {lastSync && firebaseUrl && <div style={{ fontSize:9, color:'#3a5a6a', marginTop:4 }}>Last synced {lastSync.toLocaleTimeString()} · auto-refreshes every 20s</div>}
 
           {/* Created link banner */}
           {createdLink && (
-            <div className="pop" style={{ background:`${accentColor}14`, border:`1px solid ${accentColor}40`, borderRadius:14, padding:'12px 14px', marginTop:10 }}>
-              <div style={{ fontSize:12, color:accentColor, fontWeight:700, marginBottom:6 }}>🔗 Challenge link ready — send it!</div>
+            <div className="pop" style={{ background:`${accentColor}12`, border:`1px solid ${accentColor}35`, borderRadius:14, padding:'12px 14px', marginTop:10 }}>
+              <div style={{ fontSize:12, color:accentColor, fontWeight:700, marginBottom:6 }}>🔗 Challenge link ready — send it to your friend!</div>
               <div style={{ display:'flex', gap:8 }}>
-                <button onClick={() => { navigator.clipboard?.writeText(createdLink).catch(()=>{}); showToast('Copied! 📋','success'); }} style={{ flex:1, padding:'9px', borderRadius:10, border:`1px solid ${accentColor}50`, background:`${accentColor}18`, color:accentColor, fontFamily:"'Oswald',sans-serif", fontSize:12, fontWeight:700, cursor:'pointer' }}>📋 COPY LINK</button>
-                {navigator.share && <button onClick={() => navigator.share({ title:'Hub Challenge', text:`${userName} challenged you!`, url:createdLink }).catch(()=>{})} style={{ flex:1, padding:'9px', borderRadius:10, border:'1px solid rgba(74,158,255,0.45)', background:'rgba(74,158,255,0.1)', color:'#4A9EFF', fontFamily:"'Oswald',sans-serif", fontSize:12, fontWeight:700, cursor:'pointer' }}>📤 SHARE</button>}
-                <button onClick={() => setCreatedLink(null)} style={{ padding:'9px 12px', borderRadius:10, border:'1px solid rgba(255,255,255,0.1)', background:'transparent', color:'#555', cursor:'pointer', fontSize:13 }}>✕</button>
+                <button onClick={() => { navigator.clipboard?.writeText(createdLink).catch(()=>{}); showToast('Copied! 📋','success'); }} style={{ flex:1, padding:'9px', borderRadius:10, border:`1px solid ${accentColor}50`, background:`${accentColor}18`, color:accentColor, fontFamily:"'Oswald',sans-serif", fontSize:11, fontWeight:700, cursor:'pointer' }}>📋 COPY LINK</button>
+                {navigator.share && <button onClick={() => navigator.share({ title:'Hub Challenge', text:`${userName} challenged you!`, url:createdLink }).catch(()=>{})} style={{ flex:1, padding:'9px', borderRadius:10, border:'1px solid rgba(74,158,255,0.4)', background:'rgba(74,158,255,0.1)', color:'#4A9EFF', fontFamily:"'Oswald',sans-serif", fontSize:11, fontWeight:700, cursor:'pointer' }}>📤 SHARE</button>}
+                <button onClick={() => setCreatedLink(null)} style={{ padding:'9px 12px', borderRadius:10, border:'1px solid rgba(255,255,255,0.1)', background:'transparent', color:'#555', cursor:'pointer' }}>✕</button>
               </div>
             </div>
           )}
         </div>
 
         <div style={{ flex:1, overflowY:'auto', padding:'12px 20px', paddingBottom:40 }}>
+          {!firebaseUrl && <NoFirebaseBanner />}
+
           {myChallenges.length === 0 ? (
-            <div style={{ textAlign:'center', paddingTop:50 }}>
-              <div style={{ fontSize:68, marginBottom:16 }}>🏆</div>
+            <div style={{ textAlign:'center', paddingTop:40 }}>
+              <div style={{ fontSize:64, marginBottom:14 }}>🏆</div>
               <div style={{ fontFamily:"'Oswald',sans-serif", fontSize:22, fontWeight:700, color:'#fff', marginBottom:8 }}>NO ACTIVE CHALLENGES</div>
-              <div style={{ fontSize:13, color:'#4a6a7a', marginBottom:28, lineHeight:1.6, maxWidth:280, margin:'0 auto 28px' }}>
-                Challenge a friend — share a link and race to crush your goals together. Progress auto-tracks from your logs.
-              </div>
+              <div style={{ fontSize:13, color:'#4a6a7a', marginBottom:24, lineHeight:1.6, maxWidth:280, margin:'0 auto 24px' }}>Create a challenge, share the link — both of your progress updates automatically as you log food and workouts.</div>
               <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10, marginBottom:20, textAlign:'left' }}>
-                {[
-                  { emoji:'💪', title:'Protein War', desc:'Who hits protein goal more days' },
-                  { emoji:'🏋️', title:'Gym Grind',   desc:'Most workouts in 30 days' },
-                  { emoji:'🔥', title:'Calorie Club', desc:'Stay in range every day' },
-                  { emoji:'💰', title:'Budget Boss',  desc:'Stay under grocery budget' },
-                ].map(t => (
-                  <div key={t.title} onClick={() => setCView('create')} style={{ background:'rgba(255,255,255,0.03)', borderRadius:14, padding:'12px 12px', border:'1px solid rgba(255,255,255,0.06)', cursor:'pointer' }}>
-                    <div style={{ fontSize:22, marginBottom:4 }}>{t.emoji}</div>
+                {[ {emoji:'💪',title:'Protein War',desc:'Who hits protein more days'}, {emoji:'🏋️',title:'Gym Grind',desc:'Most workouts in 30 days'}, {emoji:'🔥',title:'Calorie Club',desc:'Stay in range every day'}, {emoji:'💰',title:'Budget Boss',desc:'Stay under grocery budget'} ].map(t => (
+                  <div key={t.title} onClick={() => setCView('create')} style={{ background:'rgba(255,255,255,0.03)', borderRadius:14, padding:12, border:'1px solid rgba(255,255,255,0.06)', cursor:'pointer' }}>
+                    <div style={{ fontSize:20, marginBottom:4 }}>{t.emoji}</div>
                     <div style={{ fontSize:12, color:'#ddd', fontWeight:700 }}>{t.title}</div>
                     <div style={{ fontSize:10, color:'#555', marginTop:2 }}>{t.desc}</div>
                   </div>
@@ -2424,57 +2530,70 @@ After searching, reply with ONLY a valid JSON array, no markdown:
               <button onClick={() => setCView('create')} style={{ padding:'14px 32px', borderRadius:16, border:'none', background:accentColor, color:'#000', fontFamily:"'Oswald',sans-serif", fontSize:16, fontWeight:800, cursor:'pointer', letterSpacing:0.5 }}>START A CHALLENGE →</button>
             </div>
           ) : myChallenges.slice().reverse().map(challenge => {
-            const p = getProgress(challenge);
+            const board = getLeaderboard(challenge);
+            const me = board.find(p => p.isMe) || board[0];
             const endDate = new Date(challenge.startDate); endDate.setDate(endDate.getDate() + challenge.durationDays);
             const isOver  = new Date() > endDate;
             const daysLeft = Math.max(0, Math.ceil((endDate - new Date()) / 86400000));
-            const todayISO = isoDate(new Date());
-            const todayDone = p.days.find(d => d.dateStr === todayISO)?.status === 'done';
+            const todayISO = new Date().toISOString().split('T')[0];
+            const todayDone = me?.days.find(d => d.ds === todayISO)?.status === 'done';
             const showCheckin = challenge.type === 'custom' && !todayDone && !isOver;
-            const scoreColor = p.pct >= 75 ? accentColor : p.pct >= 45 ? '#F59E0B' : '#FF6B4A';
+            const leader = board[0];
+            const iWinning = leader?.isMe;
 
             return (
-              <div key={challenge.id} className="pop" style={{ background:'rgba(255,255,255,0.03)', borderRadius:20, padding:16, marginBottom:14, border:`1px solid ${isOver && p.pct >= 70 ? accentColor+'50' : 'rgba(255,255,255,0.06)'}` }}>
-                {/* Card header */}
-                <div style={{ display:'flex', gap:12, alignItems:'flex-start', marginBottom:12 }}>
-                  <div style={{ width:48, height:48, borderRadius:14, background:`${accentColor}18`, border:`1px solid ${accentColor}30`, display:'flex', alignItems:'center', justifyContent:'center', fontSize:24, flexShrink:0 }}>{challenge.emoji}</div>
-                  <div style={{ flex:1, minWidth:0 }}>
-                    <div style={{ fontFamily:"'Oswald',sans-serif", fontSize:16, fontWeight:700, color:'#fff', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{challenge.title}</div>
-                    {challenge.friendName && <div style={{ fontSize:11, color:'#4a6a7a', marginTop:1 }}>⚔️ vs <span style={{ color:accentColor }}>{challenge.friendName}</span></div>}
-                    <div style={{ fontSize:10, color:isOver?'#555':'#4a6a7a', marginTop:2 }}>{isOver ? '✅ FINISHED' : `⏳ ${daysLeft} day${daysLeft!==1?'s':''} left`}</div>
+              <div key={challenge.id} className="pop" style={{ background:'rgba(255,255,255,0.03)', borderRadius:20, padding:16, marginBottom:16, border:`1px solid ${isOver&&(me?.pct||0)>=70?accentColor+'50':'rgba(255,255,255,0.06)'}` }}>
+                {/* Challenge header */}
+                <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:14 }}>
+                  <div style={{ display:'flex', gap:11, alignItems:'center' }}>
+                    <div style={{ width:46, height:46, borderRadius:14, background:`${accentColor}18`, border:`1px solid ${accentColor}30`, display:'flex', alignItems:'center', justifyContent:'center', fontSize:24, flexShrink:0 }}>{challenge.emoji}</div>
+                    <div>
+                      <div style={{ fontFamily:"'Oswald',sans-serif", fontSize:16, fontWeight:700, color:'#fff' }}>{challenge.title}</div>
+                      <div style={{ fontSize:10, color:isOver?'#555':'#4a6a7a', marginTop:2 }}>{isOver ? '🏁 FINISHED' : `⏳ ${daysLeft} day${daysLeft!==1?'s':''} left`} · {challenge.durationDays}d challenge</div>
+                    </div>
                   </div>
-                  {/* Score circle */}
-                  <div style={{ textAlign:'center', flexShrink:0 }}>
-                    <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:30, color:scoreColor, lineHeight:1 }}>{p.pct}%</div>
-                    <div style={{ fontSize:9, color:'#555', letterSpacing:0.5 }}>{p.isCount ? `${p.done}/${challenge.target}` : `${p.done}/${p.past}d`}</div>
-                  </div>
+                  {board.length > 1 && (
+                    <div style={{ textAlign:'center', flexShrink:0 }}>
+                      <div style={{ fontSize:11, color: iWinning ? accentColor : '#FF6B4A', fontWeight:700 }}>{iWinning ? '🥇 LEADING' : '🔥 BEHIND'}</div>
+                      <div style={{ fontSize:9, color:'#555', marginTop:1 }}>{board.length} players</div>
+                    </div>
+                  )}
                 </div>
 
-                {/* Progress bar */}
-                <div style={{ height:6, borderRadius:3, background:'rgba(255,255,255,0.07)', overflow:'hidden', marginBottom:12 }}>
-                  <div style={{ height:'100%', borderRadius:3, background:scoreColor, width:`${p.pct}%`, transition:'width 0.5s ease' }} />
-                </div>
-
-                {/* Day dots grid */}
-                <div style={{ display:'flex', flexWrap:'wrap', gap:5, marginBottom:12 }}>
-                  {p.days.map((day, i) => {
-                    const s = day.status;
-                    const bg = s==='done' ? accentColor : s==='miss' ? 'rgba(255,107,74,0.6)' : s==='over' ? '#F59E0B' : 'rgba(255,255,255,0.07)';
-                    const isToday = day.dateStr === todayISO;
-                    return (
-                      <div key={i} title={day.dateStr} style={{ width:22, height:22, borderRadius:7, background:bg, display:'flex', alignItems:'center', justifyContent:'center', fontSize:10, color:s==='done'?'#000':'rgba(255,255,255,0.6)', boxShadow:isToday?`0 0 0 2px ${accentColor}`:'none', transition:'all 0.2s' }}>
-                        {s==='done'?'✓':s==='miss'?'✗':s==='over'?'↑':''}
+                {/* LEADERBOARD — one row per participant */}
+                <div style={{ display:'flex', flexDirection:'column', gap:10, marginBottom:14 }}>
+                  {board.map((p, rank) => (
+                    <div key={p.pid} style={{ background: p.isMe ? `${accentColor}0c` : 'rgba(255,255,255,0.02)', borderRadius:14, padding:'10px 12px', border:`1px solid ${p.isMe ? accentColor+'30' : 'rgba(255,255,255,0.05)'}` }}>
+                      {/* Participant header row */}
+                      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:8 }}>
+                        <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+                          <span style={{ fontSize:20 }}>{p.avatar}</span>
+                          <div>
+                            <div style={{ fontSize:13, fontWeight:700, color: p.isMe ? accentColor : '#ddd' }}>
+                              {rank === 0 && board.length > 1 ? '🥇 ' : rank === 1 ? '🥈 ' : ''}{p.name}{p.isMe ? ' (you)' : ''}
+                            </div>
+                            <div style={{ fontSize:9, color:'#555' }}>{p.done}/{p.past} days hit · {p.pct}%</div>
+                          </div>
+                        </div>
+                        <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:26, color: p.pct>=75?accentColor:p.pct>=40?'#F59E0B':'#FF6B4A', lineHeight:1 }}>{p.pct}%</div>
                       </div>
-                    );
-                  })}
-                </div>
-
-                {/* Legend */}
-                <div style={{ display:'flex', gap:12, marginBottom:12, flexWrap:'wrap' }}>
-                  {[['done',accentColor,'Hit'],['miss','rgba(255,107,74,0.8)','Miss'],['future','rgba(255,255,255,0.15)','Ahead']].map(([s,c,l]) => (
-                    <div key={s} style={{ display:'flex', alignItems:'center', gap:4, fontSize:9, color:'#555' }}>
-                      <div style={{ width:8, height:8, borderRadius:3, background:c }} />
-                      {l}
+                      {/* Progress bar */}
+                      <div style={{ height:5, borderRadius:3, background:'rgba(255,255,255,0.07)', overflow:'hidden', marginBottom:8 }}>
+                        <div style={{ height:'100%', borderRadius:3, background: p.pct>=75?accentColor:p.pct>=40?'#F59E0B':'#FF6B4A', width:`${p.pct}%`, transition:'width 0.5s ease' }} />
+                      </div>
+                      {/* Day dots */}
+                      <div style={{ display:'flex', flexWrap:'wrap', gap:4 }}>
+                        {p.days.map((day, i) => {
+                          const s = day.status;
+                          const bg = s==='done'?accentColor:s==='miss'?'rgba(255,107,74,0.55)':s==='over'?'#F59E0B':'rgba(255,255,255,0.07)';
+                          const isToday = day.ds === todayISO;
+                          return (
+                            <div key={i} title={day.ds} style={{ width:20, height:20, borderRadius:6, background:bg, display:'flex', alignItems:'center', justifyContent:'center', fontSize:9, color:s==='done'?'#000':'rgba(255,255,255,0.6)', boxShadow:isToday?`0 0 0 2px ${accentColor}`:'none' }}>
+                              {s==='done'?'✓':s==='miss'?'✗':s==='over'?'↑':''}
+                            </div>
+                          );
+                        })}
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -2482,16 +2601,9 @@ After searching, reply with ONLY a valid JSON array, no markdown:
                 {/* Action row */}
                 <div style={{ display:'flex', gap:7, flexWrap:'wrap' }}>
                   {showCheckin && (
-                    <button onClick={() => doCheckIn(challenge.id)} style={{ flex:'1 1 120px', padding:'9px 6px', borderRadius:11, border:`1px solid ${accentColor}50`, background:`${accentColor}18`, color:accentColor, fontFamily:"'Oswald',sans-serif", fontSize:11, fontWeight:700, cursor:'pointer', letterSpacing:0.3 }}>
-                      ✓ CHECK IN TODAY
-                    </button>
+                    <button onClick={() => doCheckIn(challenge.id)} style={{ flex:'1 1 110px', padding:'9px 6px', borderRadius:11, border:`1px solid ${accentColor}50`, background:`${accentColor}18`, color:accentColor, fontFamily:"'Oswald',sans-serif", fontSize:11, fontWeight:700, cursor:'pointer' }}>✓ CHECK IN</button>
                   )}
-                  <button onClick={() => doShareScore(challenge)} style={{ flex:'1 1 90px', padding:'9px 6px', borderRadius:11, border:'1px solid rgba(74,158,255,0.4)', background:'rgba(74,158,255,0.08)', color:'#4A9EFF', fontFamily:"'Oswald',sans-serif", fontSize:11, fontWeight:700, cursor:'pointer', letterSpacing:0.3 }}>
-                    📊 MY SCORE
-                  </button>
-                  <button onClick={() => doInvite(challenge)} style={{ flex:'1 1 90px', padding:'9px 6px', borderRadius:11, border:'1px solid rgba(168,85,247,0.4)', background:'rgba(168,85,247,0.08)', color:'#A855F7', fontFamily:"'Oswald',sans-serif", fontSize:11, fontWeight:700, cursor:'pointer', letterSpacing:0.3 }}>
-                    🔗 INVITE
-                  </button>
+                  <button onClick={() => doInvite(challenge)} style={{ flex:'1 1 90px', padding:'9px 6px', borderRadius:11, border:'1px solid rgba(168,85,247,0.4)', background:'rgba(168,85,247,0.08)', color:'#A855F7', fontFamily:"'Oswald',sans-serif", fontSize:11, fontWeight:700, cursor:'pointer' }}>🔗 INVITE</button>
                   <button onClick={() => doDelete(challenge.id)} style={{ padding:'9px 11px', borderRadius:11, border:'1px solid rgba(255,80,80,0.2)', background:'transparent', color:'rgba(255,80,80,0.45)', cursor:'pointer', fontSize:13 }}>🗑</button>
                 </div>
               </div>
@@ -2516,13 +2628,20 @@ After searching, reply with ONLY a valid JSON array, no markdown:
     const canNext = step === 0 ? localName.trim().length >= 2 : true;
 
     function finish() {
-      setUserName(localName.trim());
-      setUserAvatar(localAvatar);
-      setUserGoal(localGoal);
+      const name = localName.trim() || 'Athlete';
+      setUserName(name);
+      setUserAvatar(localAvatar || '💪');
+      setUserGoal(localGoal || 'recomp');
       setWeekBudget(parseFloat(localBudget) || 150);
+      // persist immediately so the main app reads them on first render
+      save('userName',   name);
+      save('userAvatar', localAvatar || '💪');
+      save('userGoal',   localGoal || 'recomp');
+      save('weekBudget', parseFloat(localBudget) || 150);
+      save('onboarded',  true);
       setOnboarded(true);
       setScreen('home');
-      showToast(`Welcome, ${localName.trim()}! 🎉`, 'success');
+      setTimeout(() => showToast(`Welcome, ${name}! 🎉`, 'success'), 300);
     }
 
     const accent = '#4BDE80';
@@ -2646,10 +2765,11 @@ After searching, reply with ONLY a valid JSON array, no markdown:
     const [lHeight, setLHeight] = useState(userHeight);
     const [lAvatar, setLAvatar] = useState(userAvatar);
     const [showAvatarPicker, setShowAvatarPicker] = useState(false);
-    const [sKey2,   setSKey2]   = useState(apiKey);
-    const [sUrl2,   setSUrl2]   = useState(vercelUrl);
-    const [sBudget2,setSBudget2]= useState(String(weekBudget));
-    const [sVault2, setSVault2] = useState(vaultName);
+    const [sKey2,      setSKey2]      = useState(apiKey);
+    const [sUrl2,      setSUrl2]      = useState(vercelUrl);
+    const [sBudget2,   setSBudget2]   = useState(String(weekBudget));
+    const [sVault2,    setSVault2]    = useState(vaultName);
+    const [sFirebase2, setSFirebase2] = useState(firebaseUrl);
 
     const avatarOptions = ['💪','🏋️','🔥','⚡','🦾','🥊','🏃','🧠','🎯','🥷','🦅','🌊','🐺','⚔️','🛡️','💎','🌟','🚀','😤','👊','🏆','🎯','🔱','⚡','🧬','🫀','💯','🦁'];
     const ACCENT_PRESETS = [
@@ -2907,17 +3027,27 @@ After searching, reply with ONLY a valid JSON array, no markdown:
               <div style={{ fontSize: 10, color: '#4a6a7a', letterSpacing: 1, marginBottom: 8 }}>OBSIDIAN VAULT NAME</div>
               <input value={sVault2} onChange={e => setSVault2(e.target.value)} placeholder="My Vault" style={inp} />
 
+              {/* Firebase URL — required for real-time challenges */}
+              <div style={{ marginTop: 4 }}>
+                <div style={{ fontSize: 10, color: '#4a6a7a', letterSpacing: 1, marginBottom: 4 }}>FIREBASE DATABASE URL <span style={{ color: sFirebase2 ? accentColor : '#FF6B4A' }}>{sFirebase2 ? '✓ CONNECTED' : '⚡ NEEDED FOR CHALLENGES'}</span></div>
+                <input value={sFirebase2} onChange={e => setSFirebase2(e.target.value)} placeholder="https://your-project-default-rtdb.firebaseio.com" style={{ ...inp, border: `1px solid ${sFirebase2 ? accentColor + '50' : 'rgba(255,107,74,0.4)'}` }} />
+                <div style={{ fontSize: 10, color: '#3a5a6a', marginBottom: 8, lineHeight: 1.5 }}>
+                  Free setup: <span style={{ color: '#fff' }}>firebase.google.com</span> → New project → Realtime Database → Start in test mode → copy the URL shown. Takes 2 min.
+                </div>
+              </div>
+
               <button onClick={() => {
                 setApiKey(sKey2); setVercelUrl(sUrl2);
                 setWeekBudget(parseFloat(sBudget2) || 150);
                 setVaultName(sVault2);
+                setFirebaseUrl(sFirebase2.trim());
                 showToast('App settings saved ✓', 'success');
               }} style={{ width: '100%', padding: 14, borderRadius: 14, border: 'none', background: accentColor, color: '#000', fontFamily: "'Oswald',sans-serif", fontSize: 17, fontWeight: 800, cursor: 'pointer', letterSpacing: 0.5, marginBottom: 10, marginTop: 8 }}>
                 SAVE APP SETTINGS
               </button>
 
               <button onClick={() => {
-                setApiKey(sKey2); setVercelUrl(sUrl2); setWeekBudget(parseFloat(sBudget2) || 150); setVaultName(sVault2);
+                setApiKey(sKey2); setVercelUrl(sUrl2); setWeekBudget(parseFloat(sBudget2) || 150); setVaultName(sVault2); setFirebaseUrl(sFirebase2.trim());
                 setTimeout(generateSyncLink, 50);
               }} style={{ width: '100%', padding: 13, borderRadius: 14, border: '1px solid rgba(74,158,255,0.35)', background: 'rgba(74,158,255,0.08)', color: '#4A9EFF', fontFamily: "'Oswald',sans-serif", fontSize: 15, fontWeight: 700, cursor: 'pointer', letterSpacing: 0.5, marginBottom: 16 }}>
                 📱 COPY SYNC LINK (FOR OTHER DEVICES)
@@ -3200,7 +3330,7 @@ After searching, reply with ONLY a valid JSON array, no markdown:
 
 /* ── SERVICE WORKER ── */
 if ('serviceWorker' in navigator) {
-  const sw = `const C='drews-hub-v12';self.addEventListener('install',e=>{e.waitUntil(caches.open(C).then(c=>c.addAll(['.'])));self.skipWaiting();});self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==C).map(k=>caches.delete(k)))));self.clients.claim();});self.addEventListener('fetch',e=>{if(e.request.method!=='GET')return;const u=e.request.url;if(u.includes('api.anthropic.com')||u.includes('openfoodfacts')||u.includes('themealdb')||u.includes('fonts.googleapis')||u.includes('cdnjs'))return;e.respondWith(caches.match(e.request).then(r=>r||fetch(e.request).then(res=>{if(res&&res.ok){const cl=res.clone();caches.open(C).then(c=>c.put(e.request,cl));}return res;})));});`;
+  const sw = `const C='drews-hub-v13';self.addEventListener('install',e=>{e.waitUntil(caches.open(C).then(c=>c.addAll(['.'])));self.skipWaiting();});self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==C).map(k=>caches.delete(k)))));self.clients.claim();});self.addEventListener('fetch',e=>{if(e.request.method!=='GET')return;const u=e.request.url;if(u.includes('api.anthropic.com')||u.includes('openfoodfacts')||u.includes('themealdb')||u.includes('fonts.googleapis')||u.includes('cdnjs'))return;e.respondWith(caches.match(e.request).then(r=>r||fetch(e.request).then(res=>{if(res&&res.ok){const cl=res.clone();caches.open(C).then(c=>c.put(e.request,cl));}return res;})));});`;
   try { navigator.serviceWorker.register(URL.createObjectURL(new Blob([sw], { type: 'application/javascript' }))).catch(() => {}); } catch {}
 }
 
