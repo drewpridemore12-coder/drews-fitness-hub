@@ -693,6 +693,16 @@ function FitnessHub() {
   const [apiKey,     setApiKey]     = useState(() => load('claudeKey', ''));
   const [vercelUrl,  setVercelUrl]  = useState(() => load('vercelUrl', ''));
   const [vaultName,  setVaultName]  = useState(() => load('vaultName', ''));
+  /* ── profile / account ── */
+  const [userName,     setUserName]     = useState(() => load('userName', ''));
+  const [userAvatar,   setUserAvatar]   = useState(() => load('userAvatar', '💪'));
+  const [userBio,      setUserBio]      = useState(() => load('userBio', ''));
+  const [userAge,      setUserAge]      = useState(() => load('userAge', ''));
+  const [userWeight,   setUserWeight]   = useState(() => load('userWeight', ''));
+  const [userHeight,   setUserHeight]   = useState(() => load('userHeight', ''));
+  const [accentColor,  setAccentColor]  = useState(() => load('accentColor', '#4BDE80'));
+  const [hubWidgets,   setHubWidgets]   = useState(() => load('hubWidgets', { plan:true, macros:true, log:true, streak:true }));
+  const [onboarded,    setOnboarded]    = useState(() => load('onboarded', false));
 
   /* ── ephemeral UI ── */
   const [screen,       setScreen]       = useState('home');
@@ -759,6 +769,15 @@ function FitnessHub() {
   useEffect(() => save('vercelUrl',              vercelUrl),  [vercelUrl]);
   useEffect(() => save('vaultName',              vaultName),  [vaultName]);
   useEffect(() => save('entries_' + todayStr(),  entries),    [entries]);
+  useEffect(() => save('userName',     userName),     [userName]);
+  useEffect(() => save('userAvatar',   userAvatar),   [userAvatar]);
+  useEffect(() => save('userBio',      userBio),      [userBio]);
+  useEffect(() => save('userAge',      userAge),      [userAge]);
+  useEffect(() => save('userWeight',   userWeight),   [userWeight]);
+  useEffect(() => save('userHeight',   userHeight),   [userHeight]);
+  useEffect(() => save('accentColor',  accentColor),  [accentColor]);
+  useEffect(() => save('hubWidgets',   hubWidgets),   [hubWidgets]);
+  useEffect(() => save('onboarded',    onboarded),    [onboarded]);
   /* sync settings staging state whenever the modal opens */
   useEffect(() => {
     if (showSettings) { setSKey(apiKey); setSUrl(vercelUrl); setSBudget(String(weekBudget)); setSVaultName(vaultName); }
@@ -1438,45 +1457,47 @@ After searching, reply with ONLY a valid JSON array, no markdown:
       <div style={{ flex: 1, overflowY: 'auto', padding: '16px 16px 0' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
           <div>
-            <div style={{ fontFamily: "'Bebas Neue',sans-serif", fontSize: 28, color: '#fff', lineHeight: 1 }}>DREW'S HUB</div>
+            <div style={{ fontFamily: "'Bebas Neue',sans-serif", fontSize: 26, color: '#fff', lineHeight: 1 }}>{userName ? `${userName.toUpperCase()}'S HUB` : "MY HUB"}</div>
             <div style={{ fontSize: 11, color: '#4a6a7a', letterSpacing: 1 }}>
               {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' }).toUpperCase()}
             </div>
           </div>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            <div onClick={() => setShowSettings(true)} style={{ padding: '5px 11px', borderRadius: 20, background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)', fontSize: 11, color: '#aaa', cursor: 'pointer' }}>
+            <div onClick={() => setScreen('profile')} style={{ padding: '5px 11px', borderRadius: 20, background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)', fontSize: 11, color: '#aaa', cursor: 'pointer' }}>
               {goal.emoji} {goal.label}
             </div>
-            <button onClick={() => setShowSettings(true)} style={{ width: 36, height: 36, borderRadius: '50%', border: '1px solid rgba(255,255,255,0.1)', background: 'rgba(255,255,255,0.05)', color: '#aaa', fontSize: 16, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>⚙️</button>
+            <button onClick={() => setScreen('profile')} style={{ width: 36, height: 36, borderRadius: '50%', border: `1px solid ${accentColor}50`, background: `${accentColor}12`, fontSize: 20, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{userAvatar}</button>
           </div>
         </div>
 
-        <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 20, padding: '18px 10px', border: '1px solid rgba(255,255,255,0.06)', marginBottom: 14 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-around', flexWrap: 'wrap', gap: 4 }}>
-            <MacroRing value={fmt(todayCal)}  max={goal.cal}     label="CALORIES" unit=""  color="#FF6B4A" size={88} />
-            <MacroRing value={fmt(todayPro)}  max={goal.protein} label="PROTEIN"  unit="g" color="#4A9EFF" size={88} />
-            <MacroRing value={fmt(todayCarb)} max={goal.carbs}   label="CARBS"    unit="g" color="#A855F7" size={88} />
-            <MacroRing value={fmt(todayFat)}  max={goal.fat}     label="FAT"      unit="g" color="#F5C842" size={88} />
-          </div>
-          <div style={{ marginTop: 12, display: 'flex', justifyContent: 'center', gap: 24 }}>
-            <div style={{ textAlign: 'center' }}>
-              <div style={{ fontSize: 13, fontWeight: 700, color: remCal < 0 ? '#FF6B4A' : '#4BDE80' }}>
-                {remCal > 0 ? `${fmt(remCal)} left` : `${fmt(-remCal)} over`}
-              </div>
-              <div style={{ fontSize: 9, color: '#555', letterSpacing: 1 }}>CALORIES</div>
+        {hubWidgets.macros && (
+          <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 20, padding: '18px 10px', border: '1px solid rgba(255,255,255,0.06)', marginBottom: 14 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-around', flexWrap: 'wrap', gap: 4 }}>
+              <MacroRing value={fmt(todayCal)}  max={goal.cal}     label="CALORIES" unit=""  color="#FF6B4A" size={88} />
+              <MacroRing value={fmt(todayPro)}  max={goal.protein} label="PROTEIN"  unit="g" color={accentColor} size={88} />
+              <MacroRing value={fmt(todayCarb)} max={goal.carbs}   label="CARBS"    unit="g" color="#A855F7" size={88} />
+              <MacroRing value={fmt(todayFat)}  max={goal.fat}     label="FAT"      unit="g" color="#F5C842" size={88} />
             </div>
-            <div style={{ textAlign: 'center' }}>
-              <div style={{ fontSize: 13, fontWeight: 700, color: remPro < 0 ? '#FF6B4A' : '#4BDE80' }}>
-                {remPro > 0 ? `${fmt(remPro)}g left` : 'Goal hit! 💪'}
+            <div style={{ marginTop: 12, display: 'flex', justifyContent: 'center', gap: 24 }}>
+              <div style={{ textAlign: 'center' }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: remCal < 0 ? '#FF6B4A' : accentColor }}>
+                  {remCal > 0 ? `${fmt(remCal)} left` : `${fmt(-remCal)} over`}
+                </div>
+                <div style={{ fontSize: 9, color: '#555', letterSpacing: 1 }}>CALORIES</div>
               </div>
-              <div style={{ fontSize: 9, color: '#555', letterSpacing: 1 }}>PROTEIN</div>
+              <div style={{ textAlign: 'center' }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: remPro < 0 ? '#FF6B4A' : accentColor }}>
+                  {remPro > 0 ? `${fmt(remPro)}g left` : 'Goal hit! 💪'}
+                </div>
+                <div style={{ fontSize: 9, color: '#555', letterSpacing: 1 }}>PROTEIN</div>
+              </div>
             </div>
           </div>
-        </div>
+        )}
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 14 }}>
           {[
-            { icon: '🍽️', label: 'Log Food',  action: () => setScreen('log'),   color: '#4BDE80' },
+            { icon: '🍽️', label: 'Log Food',  action: () => setScreen('log'),   color: accentColor },
             { icon: '💪',  label: 'Train',     action: () => setScreen('train'), color: '#FF6B4A' },
             { icon: '📖',  label: 'Recipes',   action: () => setScreen('cook'),  color: '#4A9EFF' },
             { icon: '🛒',  label: 'Shop',      action: () => setScreen('shop'),  color: '#F5C842' },
@@ -1488,7 +1509,7 @@ After searching, reply with ONLY a valid JSON array, no markdown:
           ))}
         </div>
 
-        {todayPlan.length > 0 && (
+        {hubWidgets.plan && todayPlan.length > 0 && (
           <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 16, padding: 14, border: '1px solid rgba(255,255,255,0.06)', marginBottom: 14 }}>
             <div style={{ fontSize: 10, color: '#4a6a7a', letterSpacing: 1, marginBottom: 8 }}>TODAY'S PLAN</div>
             {todayPlan.map((m, i) => {
@@ -1496,14 +1517,14 @@ After searching, reply with ONLY a valid JSON array, no markdown:
               return (
                 <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '7px 0', borderTop: i > 0 ? '1px solid rgba(255,255,255,0.04)' : undefined }}>
                   <div style={{ fontSize: 13, color: '#ddd' }}>{m.name}</div>
-                  {r && <button onClick={() => addRecipeToLog(r, m.servings)} style={{ fontSize: 11, padding: '4px 10px', borderRadius: 8, border: 'none', background: 'rgba(75,222,128,0.15)', color: '#4BDE80', cursor: 'pointer', fontFamily: 'inherit' }}>+Log</button>}
+                  {r && <button onClick={() => addRecipeToLog(r, m.servings)} style={{ fontSize: 11, padding: '4px 10px', borderRadius: 8, border: 'none', background: `${accentColor}22`, color: accentColor, cursor: 'pointer', fontFamily: 'inherit' }}>+Log</button>}
                 </div>
               );
             })}
           </div>
         )}
 
-        {entries.length > 0 && (
+        {hubWidgets.log && entries.length > 0 && (
           <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 16, padding: 14, border: '1px solid rgba(255,255,255,0.06)', marginBottom: 14 }}>
             <div style={{ fontSize: 10, color: '#4a6a7a', letterSpacing: 1, marginBottom: 8 }}>TODAY'S LOG</div>
             {entries.slice(-4).reverse().map(e => (
@@ -2130,6 +2151,475 @@ After searching, reply with ONLY a valid JSON array, no markdown:
     );
   }
 
+  /* ══════════════════════════════════════════════
+     ONBOARDING SCREEN
+  ══════════════════════════════════════════════ */
+  function OnboardingScreen() {
+    const [step, setStep] = useState(0);
+    const [localName, setLocalName] = useState('');
+    const [localAvatar, setLocalAvatar] = useState('💪');
+    const [localGoal, setLocalGoal] = useState('recomp');
+    const [localBudget, setLocalBudget] = useState('150');
+    const avatarOptions = ['💪','🏋️','🔥','⚡','🦾','🥊','🏃','🧠','🎯','🥷','🦅','🌊','🐺','⚔️','🛡️','💎','🌟','🚀'];
+    const steps = ['Who are you?','Pick your avatar','Set your goal','Your budget'];
+    const canNext = step === 0 ? localName.trim().length >= 2 : true;
+
+    function finish() {
+      setUserName(localName.trim());
+      setUserAvatar(localAvatar);
+      setUserGoal(localGoal);
+      setWeekBudget(parseFloat(localBudget) || 150);
+      setOnboarded(true);
+      setScreen('home');
+      showToast(`Welcome, ${localName.trim()}! 🎉`, 'success');
+    }
+
+    const accent = '#4BDE80';
+    return (
+      <div style={{ height: '100%', overflowY: 'auto', background: 'linear-gradient(160deg,#0c1220 0%,#0c0c18 100%)', display: 'flex', flexDirection: 'column', padding: '0 24px' }}>
+        {/* Progress dots */}
+        <div style={{ display: 'flex', justifyContent: 'center', gap: 8, paddingTop: 'max(env(safe-area-inset-top),40px)', marginBottom: 32 }}>
+          {steps.map((_,i) => (
+            <div key={i} style={{ width: i === step ? 24 : 8, height: 8, borderRadius: 4, background: i <= step ? accent : 'rgba(255,255,255,0.12)', transition: 'all 0.3s' }} />
+          ))}
+        </div>
+
+        <div style={{ textAlign: 'center', marginBottom: 36 }}>
+          <div style={{ fontSize: 48, marginBottom: 12 }}>{step === 0 ? '👋' : step === 1 ? localAvatar : step === 2 ? GOAL_PRESETS[localGoal].emoji : '💰'}</div>
+          <div style={{ fontFamily: "'Bebas Neue',sans-serif", fontSize: 32, color: '#fff', letterSpacing: 1.5, lineHeight: 1.1 }}>{steps[step].toUpperCase()}</div>
+          <div style={{ fontSize: 13, color: '#4a6a7a', marginTop: 8 }}>
+            {step === 0 && 'This is your personal fitness hub.'}
+            {step === 1 && 'Choose an avatar that represents you.'}
+            {step === 2 && 'We\'ll tailor your macros and plans to your goal.'}
+            {step === 3 && 'We\'ll use this for meal planning & shopping.'}
+          </div>
+        </div>
+
+        {/* Step 0 — Name */}
+        {step === 0 && (
+          <div>
+            <input
+              autoFocus
+              value={localName}
+              onChange={e => setLocalName(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && canNext && setStep(1)}
+              placeholder="Your name…"
+              style={{ width: '100%', padding: '16px 20px', borderRadius: 16, border: `2px solid ${localName.trim().length >= 2 ? accent : 'rgba(255,255,255,0.1)'}`, background: 'rgba(255,255,255,0.05)', color: '#fff', fontSize: 22, fontFamily: "'Oswald',sans-serif", outline: 'none', textAlign: 'center', letterSpacing: 1, transition: 'border 0.2s' }}
+            />
+            <div style={{ fontSize: 11, color: '#4a6a7a', textAlign: 'center', marginTop: 10 }}>This is how you'll be greeted every day</div>
+          </div>
+        )}
+
+        {/* Step 1 — Avatar */}
+        {step === 1 && (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6,1fr)', gap: 10 }}>
+            {avatarOptions.map(a => (
+              <button key={a} onClick={() => setLocalAvatar(a)} style={{ fontSize: 28, padding: 10, borderRadius: 14, border: `2px solid ${localAvatar === a ? accent : 'rgba(255,255,255,0.06)'}`, background: localAvatar === a ? `${accent}18` : 'rgba(255,255,255,0.03)', cursor: 'pointer', transition: 'all 0.15s' }}>
+                {a}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* Step 2 — Goal */}
+        {step === 2 && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {Object.entries(GOAL_PRESETS).map(([k, g]) => (
+              <button key={k} onClick={() => setLocalGoal(k)} style={{ padding: '14px 16px', borderRadius: 16, border: `2px solid ${localGoal === k ? accent : 'rgba(255,255,255,0.08)'}`, background: localGoal === k ? `${accent}12` : 'rgba(255,255,255,0.03)', color: '#fff', cursor: 'pointer', textAlign: 'left', transition: 'all 0.15s' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <span style={{ fontSize: 26 }}>{g.emoji}</span>
+                  <div>
+                    <div style={{ fontFamily: "'Oswald',sans-serif", fontSize: 16, fontWeight: 700, color: localGoal === k ? accent : '#fff' }}>{g.label.toUpperCase()}</div>
+                    <div style={{ fontSize: 11, color: '#555', marginTop: 2 }}>{g.cal} cal · {g.protein}g protein/day</div>
+                    <div style={{ fontSize: 11, color: '#4a6a7a', marginTop: 1 }}>{g.desc}</div>
+                  </div>
+                  {localGoal === k && <span style={{ marginLeft: 'auto', color: accent, fontSize: 18 }}>✓</span>}
+                </div>
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* Step 3 — Budget */}
+        {step === 3 && (
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12, marginBottom: 20 }}>
+              <span style={{ fontSize: 36, color: accent }}>$</span>
+              <input
+                type="number"
+                value={localBudget}
+                onChange={e => setLocalBudget(e.target.value)}
+                style={{ width: 140, padding: '14px 10px', borderRadius: 16, border: `2px solid ${accent}`, background: 'rgba(255,255,255,0.05)', color: '#fff', fontSize: 40, fontFamily: "'Bebas Neue',sans-serif", outline: 'none', textAlign: 'center' }}
+              />
+              <span style={{ fontSize: 14, color: '#555' }}>/week</span>
+            </div>
+            <div style={{ textAlign: 'center', fontSize: 13, color: '#4a6a7a' }}>
+              ~${(parseFloat(localBudget || 150) / 7).toFixed(0)}/day · We'll keep meal plans under this
+            </div>
+            {/* Quick preset chips */}
+            <div style={{ display: 'flex', justifyContent: 'center', gap: 10, marginTop: 20, flexWrap: 'wrap' }}>
+              {[75, 100, 150, 200, 250].map(v => (
+                <button key={v} onClick={() => setLocalBudget(String(v))} style={{ padding: '8px 16px', borderRadius: 20, border: `1px solid ${localBudget === String(v) ? accent : 'rgba(255,255,255,0.1)'}`, background: localBudget === String(v) ? `${accent}18` : 'transparent', color: localBudget === String(v) ? accent : '#aaa', cursor: 'pointer', fontSize: 13, fontWeight: 700, fontFamily: 'inherit' }}>${v}</button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Nav buttons */}
+        <div style={{ display: 'flex', gap: 12, marginTop: 40, paddingBottom: 'max(env(safe-area-inset-bottom),32px)' }}>
+          {step > 0 && (
+            <button onClick={() => setStep(s => s - 1)} style={{ flex: 1, padding: 16, borderRadius: 16, border: '1px solid rgba(255,255,255,0.1)', background: 'transparent', color: '#aaa', fontFamily: "'Oswald',sans-serif", fontSize: 16, fontWeight: 700, cursor: 'pointer', letterSpacing: 0.5 }}>← BACK</button>
+          )}
+          <button
+            onClick={() => step < 3 ? setStep(s => s + 1) : finish()}
+            disabled={!canNext}
+            style={{ flex: 2, padding: 16, borderRadius: 16, border: 'none', background: canNext ? accent : 'rgba(255,255,255,0.06)', color: canNext ? '#000' : '#333', fontFamily: "'Oswald',sans-serif", fontSize: 18, fontWeight: 800, cursor: canNext ? 'pointer' : 'not-allowed', letterSpacing: 1, transition: 'all 0.2s' }}
+          >
+            {step < 3 ? 'NEXT →' : '🚀 LET\'S GO'}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  /* ══════════════════════════════════════════════
+     PROFILE SCREEN
+  ══════════════════════════════════════════════ */
+  function ProfileScreen() {
+    const [pTab, setPTab] = useState('profile');
+    const [editMode, setEditMode] = useState(false);
+    const [lName,   setLName]   = useState(userName);
+    const [lBio,    setLBio]    = useState(userBio);
+    const [lAge,    setLAge]    = useState(userAge);
+    const [lWeight, setLWeight] = useState(userWeight);
+    const [lHeight, setLHeight] = useState(userHeight);
+    const [lAvatar, setLAvatar] = useState(userAvatar);
+    const [showAvatarPicker, setShowAvatarPicker] = useState(false);
+    const [sKey2,   setSKey2]   = useState(apiKey);
+    const [sUrl2,   setSUrl2]   = useState(vercelUrl);
+    const [sBudget2,setSBudget2]= useState(String(weekBudget));
+    const [sVault2, setSVault2] = useState(vaultName);
+
+    const avatarOptions = ['💪','🏋️','🔥','⚡','🦾','🥊','🏃','🧠','🎯','🥷','🦅','🌊','🐺','⚔️','🛡️','💎','🌟','🚀','😤','👊','🏆','🎯','🔱','⚡','🧬','🫀','💯','🦁'];
+    const ACCENT_PRESETS = [
+      { color: '#4BDE80', label: 'Neon Green'  },
+      { color: '#4A9EFF', label: 'Electric Blue'},
+      { color: '#FF6B4A', label: 'Blaze Orange' },
+      { color: '#A855F7', label: 'Purple Rain'  },
+      { color: '#F59E0B', label: 'Gold Rush'    },
+      { color: '#EC4899', label: 'Hot Pink'     },
+      { color: '#06B6D4', label: 'Cyan Ice'     },
+      { color: '#10B981', label: 'Emerald'      },
+    ];
+
+    const totalWorkouts = vault.length;
+    const totalRecipes  = saved.length + TASTY_SHREDS_RECIPES.length;
+    const totalEntries  = entries.length;
+    const inp = { width: '100%', padding: '11px 14px', borderRadius: 12, border: '1px solid rgba(255,255,255,0.12)', background: 'rgba(255,255,255,0.05)', color: '#fff', fontSize: 13, fontFamily: 'inherit', outline: 'none', marginBottom: 8 };
+
+    function saveProfile() {
+      setUserName(lName.trim() || userName);
+      setUserBio(lBio);
+      setUserAge(lAge);
+      setUserWeight(lWeight);
+      setUserHeight(lHeight);
+      setUserAvatar(lAvatar);
+      setEditMode(false);
+      showToast('Profile updated ✓', 'success');
+    }
+
+    const TABS = [
+      { id: 'profile', icon: '👤', label: 'Profile' },
+      { id: 'goals',   icon: '🎯', label: 'Goals'   },
+      { id: 'theme',   icon: '🎨', label: 'Theme'   },
+      { id: 'app',     icon: '⚙️', label: 'App'     },
+    ];
+
+    return (
+      <div style={{ height: '100%', display: 'flex', flexDirection: 'column', background: '#0c0c18' }}>
+        {/* Hero header */}
+        <div style={{ background: `linear-gradient(160deg,${accentColor}22 0%,#0c0c18 80%)`, padding: 'max(env(safe-area-inset-top),20px) 20px 0', flexShrink: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
+            <div style={{ fontFamily: "'Bebas Neue',sans-serif", fontSize: 11, letterSpacing: 4, color: '#3a5a6a' }}>MY HUB</div>
+            <button onClick={() => editMode ? saveProfile() : setEditMode(true)} style={{ padding: '7px 16px', borderRadius: 20, border: `1px solid ${editMode ? accentColor : 'rgba(255,255,255,0.12)'}`, background: editMode ? `${accentColor}22` : 'transparent', color: editMode ? accentColor : '#aaa', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
+              {editMode ? '✓ SAVE' : '✏️ EDIT'}
+            </button>
+          </div>
+
+          {/* Avatar + name row */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 20 }}>
+            <button onClick={() => editMode && setShowAvatarPicker(true)} style={{ width: 72, height: 72, borderRadius: 22, border: `3px solid ${accentColor}`, background: `${accentColor}18`, fontSize: 36, cursor: editMode ? 'pointer' : 'default', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative' }}>
+              {editMode ? lAvatar : userAvatar}
+              {editMode && <span style={{ position: 'absolute', bottom: -4, right: -4, background: accentColor, borderRadius: '50%', width: 20, height: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11 }}>✏️</span>}
+            </button>
+            <div style={{ flex: 1 }}>
+              {editMode ? (
+                <>
+                  <input value={lName} onChange={e => setLName(e.target.value)} style={{ ...inp, marginBottom: 4, fontSize: 18, fontFamily: "'Oswald',sans-serif", fontWeight: 700 }} placeholder="Your name" />
+                  <input value={lBio} onChange={e => setLBio(e.target.value)} style={{ ...inp, marginBottom: 0, fontSize: 12 }} placeholder="Bio / tagline…" />
+                </>
+              ) : (
+                <>
+                  <div style={{ fontFamily: "'Oswald',sans-serif", fontSize: 24, fontWeight: 700, color: '#fff' }}>{userName || 'Set your name'}</div>
+                  <div style={{ fontSize: 12, color: '#4a6a7a', marginTop: 2 }}>{userBio || 'Tap Edit to add a bio'}</div>
+                </>
+              )}
+            </div>
+          </div>
+
+          {/* Stats strip */}
+          {!editMode && (
+            <div style={{ display: 'flex', gap: 0, marginBottom: 16, background: 'rgba(255,255,255,0.03)', borderRadius: 16, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.06)' }}>
+              {[
+                { label: 'Workouts', value: totalWorkouts, color: '#FF6B4A' },
+                { label: 'Recipes',  value: totalRecipes,  color: accentColor },
+                { label: 'Logged',   value: totalEntries,  color: '#4A9EFF' },
+              ].map((s, i) => (
+                <div key={i} style={{ flex: 1, textAlign: 'center', padding: '12px 6px', borderLeft: i > 0 ? '1px solid rgba(255,255,255,0.05)' : undefined }}>
+                  <div style={{ fontFamily: "'Bebas Neue',sans-serif", fontSize: 24, color: s.color, lineHeight: 1 }}>{s.value}</div>
+                  <div style={{ fontSize: 9, color: '#3a5a6a', letterSpacing: 0.5, marginTop: 2 }}>{s.label.toUpperCase()}</div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Tabs */}
+          <div style={{ display: 'flex', gap: 0, borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+            {TABS.map(t => (
+              <button key={t.id} onClick={() => setPTab(t.id)} style={{ flex: 1, padding: '10px 4px', border: 'none', background: 'transparent', color: pTab === t.id ? accentColor : '#3a5a6a', cursor: 'pointer', fontFamily: "'Oswald',sans-serif", fontSize: 11, fontWeight: 700, letterSpacing: 0.5, borderBottom: `2px solid ${pTab === t.id ? accentColor : 'transparent'}`, transition: 'all 0.15s' }}>
+                <div style={{ fontSize: 14 }}>{t.icon}</div>
+                <div>{t.label.toUpperCase()}</div>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Scrollable content */}
+        <div style={{ flex: 1, overflowY: 'auto', padding: '20px 20px', paddingBottom: 32 }}>
+
+          {/* ── PROFILE TAB ── */}
+          {pTab === 'profile' && (
+            <div>
+              {/* Physical stats */}
+              <div style={{ fontSize: 10, color: '#4a6a7a', letterSpacing: 1, marginBottom: 10 }}>PHYSICAL STATS</div>
+              {editMode ? (
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 16 }}>
+                  {[
+                    { label: 'Age', val: lAge, set: setLAge, placeholder: 'e.g. 28', unit: 'yrs' },
+                    { label: 'Weight', val: lWeight, set: setLWeight, placeholder: 'e.g. 185', unit: 'lbs' },
+                    { label: 'Height', val: lHeight, set: setLHeight, placeholder: 'e.g. 5\'11"', unit: '' },
+                  ].map(f => (
+                    <div key={f.label} style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 14, padding: 12, border: '1px solid rgba(255,255,255,0.06)' }}>
+                      <div style={{ fontSize: 9, color: '#4a6a7a', letterSpacing: 0.5, marginBottom: 6 }}>{f.label.toUpperCase()}</div>
+                      <input value={f.val} onChange={e => f.set(e.target.value)} placeholder={f.placeholder} style={{ width: '100%', background: 'transparent', border: 'none', color: '#fff', fontSize: 16, fontFamily: "'Oswald',sans-serif", outline: 'none', fontWeight: 600 }} />
+                      {f.unit && <div style={{ fontSize: 9, color: '#555', marginTop: 2 }}>{f.unit}</div>}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 20 }}>
+                  {[
+                    { label: 'Age',    value: userAge    || '—', sub: 'years',   color: '#F59E0B' },
+                    { label: 'Weight', value: userWeight || '—', sub: 'lbs',     color: '#FF6B4A' },
+                    { label: 'Height', value: userHeight || '—', sub: '',        color: '#4A9EFF' },
+                  ].map((s, i) => (
+                    <div key={i} style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 14, padding: '14px 10px', textAlign: 'center', border: '1px solid rgba(255,255,255,0.06)' }}>
+                      <div style={{ fontFamily: "'Bebas Neue',sans-serif", fontSize: 26, color: s.color, lineHeight: 1 }}>{s.value}</div>
+                      <div style={{ fontSize: 9, color: '#3a5a6a', letterSpacing: 0.5, marginTop: 3 }}>{s.sub || s.label.toUpperCase()}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Workout streak */}
+              <div style={{ fontSize: 10, color: '#4a6a7a', letterSpacing: 1, marginBottom: 10 }}>RECENT WORKOUTS</div>
+              {vault.length === 0 ? (
+                <div style={{ background: 'rgba(255,255,255,0.02)', borderRadius: 14, padding: 20, textAlign: 'center', border: '1px solid rgba(255,255,255,0.05)' }}>
+                  <div style={{ fontSize: 28, marginBottom: 8 }}>🏋️</div>
+                  <div style={{ fontSize: 12, color: '#4a6a7a' }}>No workouts logged yet</div>
+                  <button onClick={() => setScreen('train')} style={{ marginTop: 10, padding: '8px 18px', borderRadius: 10, border: `1px solid ${accentColor}40`, background: `${accentColor}12`, color: accentColor, cursor: 'pointer', fontFamily: 'inherit', fontSize: 12, fontWeight: 700 }}>Start Training</button>
+                </div>
+              ) : vault.slice(-5).reverse().map((w, i) => (
+                <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 14px', background: 'rgba(255,255,255,0.02)', borderRadius: 12, marginBottom: 6, border: '1px solid rgba(255,255,255,0.04)' }}>
+                  <div>
+                    <div style={{ fontSize: 13, color: '#ddd', fontWeight: 600 }}>{w.focus}</div>
+                    <div style={{ fontSize: 10, color: '#4a6a7a', marginTop: 1 }}>{w.date} · {w.totalSets} sets</div>
+                  </div>
+                  <div style={{ fontFamily: "'Bebas Neue',sans-serif", fontSize: 18, color: accentColor }}>{w.totalSets}</div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* ── GOALS TAB ── */}
+          {pTab === 'goals' && (
+            <div>
+              <div style={{ fontSize: 10, color: '#4a6a7a', letterSpacing: 1, marginBottom: 12 }}>TRAINING GOAL</div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 24 }}>
+                {Object.entries(GOAL_PRESETS).map(([k, g]) => (
+                  <button key={k} onClick={() => { setUserGoal(k); showToast(`Goal set to ${g.label} ✓`, 'success'); }} style={{ padding: '14px 16px', borderRadius: 16, border: `2px solid ${userGoal === k ? accentColor : 'rgba(255,255,255,0.08)'}`, background: userGoal === k ? `${accentColor}12` : 'rgba(255,255,255,0.02)', color: '#fff', cursor: 'pointer', textAlign: 'left', transition: 'all 0.15s' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <span style={{ fontSize: 26 }}>{g.emoji}</span>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontFamily: "'Oswald',sans-serif", fontSize: 15, fontWeight: 700, color: userGoal === k ? accentColor : '#fff' }}>{g.label.toUpperCase()}</div>
+                        <div style={{ fontSize: 11, color: '#555', marginTop: 1 }}>{g.cal} cal · {g.protein}g protein · {g.carbs}g carbs · {g.fat}g fat</div>
+                        <div style={{ fontSize: 11, color: '#4a6a7a', marginTop: 1 }}>{g.desc}</div>
+                      </div>
+                      {userGoal === k && <span style={{ color: accentColor, fontSize: 18 }}>✓</span>}
+                    </div>
+                  </button>
+                ))}
+              </div>
+              {/* Today's macros progress */}
+              <div style={{ fontSize: 10, color: '#4a6a7a', letterSpacing: 1, marginBottom: 12 }}>TODAY'S PROGRESS</div>
+              {[
+                { label: 'Calories', cur: todayCal,  target: GOAL_PRESETS[userGoal].cal,     color: '#FF6B4A', unit: 'kcal' },
+                { label: 'Protein',  cur: todayPro,  target: GOAL_PRESETS[userGoal].protein, color: accentColor, unit: 'g' },
+                { label: 'Carbs',    cur: todayCarb, target: GOAL_PRESETS[userGoal].carbs,   color: '#4A9EFF', unit: 'g' },
+                { label: 'Fat',      cur: todayFat,  target: GOAL_PRESETS[userGoal].fat,     color: '#F59E0B', unit: 'g' },
+              ].map(m => (
+                <div key={m.label} style={{ marginBottom: 14 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 5 }}>
+                    <span style={{ fontSize: 12, color: '#aaa' }}>{m.label}</span>
+                    <span style={{ fontSize: 12, color: '#555' }}><span style={{ color: m.color, fontWeight: 700 }}>{m.cur}</span> / {m.target}{m.unit}</span>
+                  </div>
+                  <div style={{ height: 6, borderRadius: 3, background: 'rgba(255,255,255,0.07)', overflow: 'hidden' }}>
+                    <div style={{ height: '100%', borderRadius: 3, background: m.color, width: `${Math.min((m.cur / m.target) * 100, 100)}%`, transition: 'width 0.4s' }} />
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* ── THEME TAB ── */}
+          {pTab === 'theme' && (
+            <div>
+              <div style={{ fontSize: 10, color: '#4a6a7a', letterSpacing: 1, marginBottom: 12 }}>ACCENT COLOR</div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 10, marginBottom: 24 }}>
+                {ACCENT_PRESETS.map(p => (
+                  <button key={p.color} onClick={() => { setAccentColor(p.color); showToast(`Theme: ${p.label} ✓`, 'success'); }} style={{ padding: '14px 8px', borderRadius: 14, border: `2px solid ${accentColor === p.color ? p.color : 'rgba(255,255,255,0.08)'}`, background: `${p.color}${accentColor === p.color ? '28' : '10'}`, cursor: 'pointer', textAlign: 'center', transition: 'all 0.15s' }}>
+                    <div style={{ width: 28, height: 28, borderRadius: '50%', background: p.color, margin: '0 auto 6px' }} />
+                    <div style={{ fontSize: 9, color: accentColor === p.color ? p.color : '#555', fontWeight: 700, letterSpacing: 0.3 }}>{p.label.toUpperCase()}</div>
+                  </button>
+                ))}
+              </div>
+
+              <div style={{ fontSize: 10, color: '#4a6a7a', letterSpacing: 1, marginBottom: 12 }}>HOME WIDGETS</div>
+              {[
+                { key: 'macros', label: 'Macro Ring',       desc: 'Calories & protein progress circle', icon: '⭕' },
+                { key: 'plan',   label: "Today's Plan",     desc: 'Meals scheduled for today',          icon: '📅' },
+                { key: 'log',    label: 'Recent Log',       desc: 'Last few food entries',              icon: '📋' },
+                { key: 'streak', label: 'Workout Streak',   desc: 'Consecutive training days',          icon: '🔥' },
+              ].map(w => (
+                <div key={w.key} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 16px', background: 'rgba(255,255,255,0.02)', borderRadius: 14, marginBottom: 8, border: '1px solid rgba(255,255,255,0.05)' }}>
+                  <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+                    <span style={{ fontSize: 22 }}>{w.icon}</span>
+                    <div>
+                      <div style={{ fontSize: 13, color: '#ddd', fontWeight: 600 }}>{w.label}</div>
+                      <div style={{ fontSize: 11, color: '#4a6a7a' }}>{w.desc}</div>
+                    </div>
+                  </div>
+                  <button onClick={() => { const n = { ...hubWidgets, [w.key]: !hubWidgets[w.key] }; setHubWidgets(n); }} style={{ width: 44, height: 26, borderRadius: 13, border: 'none', background: hubWidgets[w.key] ? accentColor : 'rgba(255,255,255,0.1)', cursor: 'pointer', position: 'relative', transition: 'background 0.2s', flexShrink: 0 }}>
+                    <div style={{ position: 'absolute', top: 3, left: hubWidgets[w.key] ? 20 : 3, width: 20, height: 20, borderRadius: '50%', background: '#fff', transition: 'left 0.2s', boxShadow: '0 1px 4px rgba(0,0,0,0.4)' }} />
+                  </button>
+                </div>
+              ))}
+
+              <div style={{ fontSize: 10, color: '#4a6a7a', letterSpacing: 1, marginBottom: 12, marginTop: 20 }}>HUB NAME</div>
+              <div style={{ display: 'flex', gap: 10, background: 'rgba(255,255,255,0.03)', borderRadius: 14, padding: 14, border: '1px solid rgba(255,255,255,0.06)', alignItems: 'center' }}>
+                <span style={{ fontSize: 22 }}>{userAvatar}</span>
+                <div>
+                  <div style={{ fontFamily: "'Oswald',sans-serif", fontSize: 16, fontWeight: 700, color: accentColor }}>{userName ? `${userName}'s Hub` : "My Hub"}</div>
+                  <div style={{ fontSize: 11, color: '#4a6a7a' }}>Shown on your home screen</div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ── APP TAB ── */}
+          {pTab === 'app' && (
+            <div>
+              <div style={{ fontSize: 10, color: '#4a6a7a', letterSpacing: 1, marginBottom: 10 }}>WEEKLY GROCERY BUDGET</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 20 }}>
+                <span style={{ fontSize: 22, color: accentColor }}>$</span>
+                <input type="number" value={sBudget2} onChange={e => setSBudget2(e.target.value)}
+                  style={{ flex: 1, padding: '12px 14px', borderRadius: 12, border: '1px solid rgba(255,255,255,0.1)', background: 'rgba(255,255,255,0.05)', color: '#fff', fontSize: 22, fontFamily: "'Bebas Neue',sans-serif", textAlign: 'center', outline: 'none' }} />
+                <span style={{ fontSize: 12, color: '#555' }}>/week</span>
+              </div>
+
+              <div style={{ fontSize: 10, color: '#4a6a7a', letterSpacing: 1, marginBottom: 8 }}>CLAUDE API KEY</div>
+              <input type="password" value={sKey2} onChange={e => setSKey2(e.target.value)} placeholder="sk-ant-…" style={inp} />
+
+              <div style={{ fontSize: 10, color: '#4a6a7a', letterSpacing: 1, marginBottom: 8, marginTop: 4 }}>VERCEL URL (TikTok / Instagram import)</div>
+              <input value={sUrl2} onChange={e => setSUrl2(e.target.value)} placeholder="https://your-app.vercel.app" style={inp} />
+
+              <div style={{ fontSize: 10, color: '#4a6a7a', letterSpacing: 1, marginBottom: 8 }}>OBSIDIAN VAULT NAME</div>
+              <input value={sVault2} onChange={e => setSVault2(e.target.value)} placeholder="My Vault" style={inp} />
+
+              <button onClick={() => {
+                setApiKey(sKey2); setVercelUrl(sUrl2);
+                setWeekBudget(parseFloat(sBudget2) || 150);
+                setVaultName(sVault2);
+                showToast('App settings saved ✓', 'success');
+              }} style={{ width: '100%', padding: 14, borderRadius: 14, border: 'none', background: accentColor, color: '#000', fontFamily: "'Oswald',sans-serif", fontSize: 17, fontWeight: 800, cursor: 'pointer', letterSpacing: 0.5, marginBottom: 10, marginTop: 8 }}>
+                SAVE APP SETTINGS
+              </button>
+
+              <button onClick={() => {
+                setApiKey(sKey2); setVercelUrl(sUrl2); setWeekBudget(parseFloat(sBudget2) || 150); setVaultName(sVault2);
+                setTimeout(generateSyncLink, 50);
+              }} style={{ width: '100%', padding: 13, borderRadius: 14, border: '1px solid rgba(74,158,255,0.35)', background: 'rgba(74,158,255,0.08)', color: '#4A9EFF', fontFamily: "'Oswald',sans-serif", fontSize: 15, fontWeight: 700, cursor: 'pointer', letterSpacing: 0.5, marginBottom: 16 }}>
+                📱 COPY SYNC LINK (FOR OTHER DEVICES)
+              </button>
+
+              <div style={{ fontSize: 10, color: '#4a6a7a', letterSpacing: 1, marginBottom: 10 }}>EXPORT TO OBSIDIAN</div>
+              {!isMobile ? (
+                <button onClick={exportToObsidianDesktop} style={{ width: '100%', padding: 13, borderRadius: 13, border: '1px solid rgba(168,85,247,0.4)', background: 'rgba(168,85,247,0.1)', color: '#A855F7', fontFamily: "'Oswald',sans-serif", fontSize: 14, fontWeight: 700, cursor: 'pointer' }}>
+                  📁 PICK VAULT FOLDER &amp; EXPORT
+                </button>
+              ) : (
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                  <button onClick={() => exportToObsidianMobile('log')} style={{ padding: 12, borderRadius: 12, border: '1px solid rgba(168,85,247,0.4)', background: 'rgba(168,85,247,0.1)', color: '#A855F7', fontFamily: "'Oswald',sans-serif", fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>📲 DAILY LOG</button>
+                  <button onClick={() => exportToObsidianMobile('workout')} style={{ padding: 12, borderRadius: 12, border: '1px solid rgba(168,85,247,0.4)', background: 'rgba(168,85,247,0.1)', color: '#A855F7', fontFamily: "'Oswald',sans-serif", fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>📲 WORKOUT</button>
+                </div>
+              )}
+
+              <div style={{ marginTop: 28, padding: 16, background: 'rgba(255,80,80,0.04)', borderRadius: 14, border: '1px solid rgba(255,80,80,0.12)' }}>
+                <div style={{ fontSize: 10, color: '#FF6B4A', letterSpacing: 1, marginBottom: 10 }}>DANGER ZONE</div>
+                <button onClick={() => {
+                  if (window.confirm('Reset onboarding? You\'ll be asked to set up your profile again.')) {
+                    setOnboarded(false); showToast('Onboarding reset', 'info');
+                  }
+                }} style={{ width: '100%', padding: 11, borderRadius: 11, border: '1px solid rgba(255,80,80,0.3)', background: 'transparent', color: '#FF6B4A', fontFamily: 'inherit', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>
+                  Reset Profile Setup
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Avatar picker modal */}
+        {showAvatarPicker && (
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.85)', zIndex: 600, display: 'flex', alignItems: 'flex-end' }}>
+            <div style={{ width: '100%', background: '#111520', borderRadius: '24px 24px 0 0', padding: '20px', paddingBottom: 'max(env(safe-area-inset-bottom),20px)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                <div style={{ fontFamily: "'Oswald',sans-serif", fontSize: 16, fontWeight: 700, color: '#fff' }}>CHOOSE AVATAR</div>
+                <button onClick={() => setShowAvatarPicker(false)} style={{ width: 30, height: 30, borderRadius: '50%', border: '1px solid rgba(255,255,255,0.1)', background: 'rgba(255,255,255,0.05)', color: '#aaa', cursor: 'pointer', fontSize: 14 }}>✕</button>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7,1fr)', gap: 8 }}>
+                {avatarOptions.map(a => (
+                  <button key={a} onClick={() => { setLAvatar(a); setShowAvatarPicker(false); }} style={{ fontSize: 28, padding: 8, borderRadius: 12, border: `2px solid ${lAvatar === a ? accentColor : 'rgba(255,255,255,0.06)'}`, background: lAvatar === a ? `${accentColor}18` : 'rgba(255,255,255,0.03)', cursor: 'pointer' }}>
+                    {a}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
   /* ── SETTINGS MODAL ── */
   function SettingsModal() {
     const inp = { width: '100%', padding: '11px 14px', borderRadius: 12, border: '1px solid rgba(255,255,255,0.1)', background: 'rgba(255,255,255,0.05)', color: '#fff', fontSize: 13, fontFamily: 'inherit', outline: 'none', marginBottom: 8 };
@@ -2236,13 +2726,25 @@ After searching, reply with ONLY a valid JSON array, no markdown:
 
   /* ── NAV + MAIN RENDER ── */
   const NAV = [
-    { id: 'home',  icon: '🏠', label: 'Home'    },
-    { id: 'log',   icon: '🍽️', label: 'Log'     },
-    { id: 'train', icon: '💪',  label: 'Train'   },
-    { id: 'cook',  icon: '📖',  label: 'Recipes' },
-    { id: 'plan',  icon: '📅',  label: 'Plan'    },
-    { id: 'shop',  icon: '🛒',  label: 'Shop'    },
+    { id: 'home',    icon: '🏠',  label: 'Home'    },
+    { id: 'log',     icon: '🍽️', label: 'Log'     },
+    { id: 'train',   icon: '💪',  label: 'Train'   },
+    { id: 'cook',    icon: '📖',  label: 'Recipes' },
+    { id: 'plan',    icon: '📅',  label: 'Plan'    },
+    { id: 'shop',    icon: '🛒',  label: 'Shop'    },
+    { id: 'profile', icon: userAvatar, label: 'Me' },
   ];
+
+  /* Show onboarding if not yet completed */
+  if (!onboarded) {
+    return (
+      <div style={{ height: '100%', background: '#0c0c18', color: '#fff', fontFamily: "'SF Pro Display',-apple-system,BlinkMacSystemFont,sans-serif", maxWidth: 500, margin: '0 auto' }}>
+        <style>{`@import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Oswald:wght@400;500;600;700&display=swap');input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;}`}</style>
+        {OnboardingScreen()}
+        {toast && <div className="pop" style={{ position: 'fixed', bottom: 40, left: '50%', transform: 'translateX(-50%)', padding: '11px 20px', borderRadius: 24, background: 'rgba(75,222,128,0.96)', color: '#000', fontWeight: 700, fontSize: 13, zIndex: 900 }}>{toast.msg}</div>}
+      </div>
+    );
+  }
 
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', background: '#0c0c18', color: '#fff', fontFamily: "'SF Pro Display',-apple-system,BlinkMacSystemFont,sans-serif", maxWidth: 500, margin: '0 auto', position: 'relative' }}>
@@ -2257,21 +2759,28 @@ After searching, reply with ONLY a valid JSON array, no markdown:
       <div style={{ height: 'env(safe-area-inset-top)', background: '#0c0c18', flexShrink: 0 }} />
 
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-        {screen === 'home'  && HomeScreen()}
-        {screen === 'log'   && LoggerScreen()}
-        {screen === 'train' && WorkoutScreen()}
-        {screen === 'cook'  && CookbookScreen()}
-        {screen === 'plan'  && PlannerScreen()}
-        {screen === 'shop'  && ShoppingScreen()}
+        {screen === 'home'    && HomeScreen()}
+        {screen === 'log'     && LoggerScreen()}
+        {screen === 'train'   && WorkoutScreen()}
+        {screen === 'cook'    && CookbookScreen()}
+        {screen === 'plan'    && PlannerScreen()}
+        {screen === 'shop'    && ShoppingScreen()}
+        {screen === 'profile' && ProfileScreen()}
       </div>
 
       <div style={{ display: 'flex', background: 'rgba(10,10,20,0.98)', borderTop: '1px solid rgba(255,255,255,0.06)', paddingBottom: 'max(env(safe-area-inset-bottom),4px)', flexShrink: 0 }}>
-        {NAV.map(({ id, icon, label }) => (
-          <button key={id} onClick={() => setScreen(id)} style={{ flex: 1, padding: '8px 2px', border: 'none', background: 'transparent', color: screen === id ? '#4BDE80' : '#3a4a5a', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, transition: 'color 0.15s' }}>
-            <span style={{ fontSize: 18, lineHeight: 1 }}>{icon}</span>
-            <span style={{ fontSize: 8, fontFamily: "'Oswald',sans-serif", fontWeight: 600, letterSpacing: 0.5 }}>{label.toUpperCase()}</span>
-          </button>
-        ))}
+        {NAV.map(({ id, icon, label }) => {
+          const active = screen === id;
+          return (
+            <button key={id} onClick={() => setScreen(id)} style={{ flex: 1, padding: '8px 2px', border: 'none', background: 'transparent', color: active ? accentColor : '#3a4a5a', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, transition: 'color 0.15s', position: 'relative' }}>
+              {id === 'profile'
+                ? <span style={{ fontSize: 18, lineHeight: 1, filter: active ? 'none' : 'grayscale(1) opacity(0.4)' }}>{icon}</span>
+                : <span style={{ fontSize: 18, lineHeight: 1 }}>{icon}</span>}
+              <span style={{ fontSize: 8, fontFamily: "'Oswald',sans-serif", fontWeight: 600, letterSpacing: 0.5 }}>{label.toUpperCase()}</span>
+              {active && <div style={{ position: 'absolute', bottom: 0, left: '50%', transform: 'translateX(-50%)', width: 20, height: 2, borderRadius: 1, background: accentColor }} />}
+            </button>
+          );
+        })}
       </div>
 
       {toast && (
@@ -2281,9 +2790,9 @@ After searching, reply with ONLY a valid JSON array, no markdown:
       )}
 
       {badge && (
-        <div className="pop" style={{ position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', padding: '28px 32px', borderRadius: 24, background: 'rgba(10,10,20,0.98)', border: `2px solid ${badge.color || '#4BDE80'}`, zIndex: 800, textAlign: 'center', boxShadow: '0 8px 60px rgba(0,0,0,0.8)', maxWidth: '85vw' }}>
+        <div className="pop" style={{ position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', padding: '28px 32px', borderRadius: 24, background: 'rgba(10,10,20,0.98)', border: `2px solid ${badge.color || accentColor}`, zIndex: 800, textAlign: 'center', boxShadow: '0 8px 60px rgba(0,0,0,0.8)', maxWidth: '85vw' }}>
           <div style={{ fontSize: 44, marginBottom: 10 }}>🏆</div>
-          <div style={{ fontFamily: "'Bebas Neue',sans-serif", fontSize: 24, color: badge.color || '#4BDE80', letterSpacing: 1, marginBottom: 5 }}>{badge.msg}</div>
+          <div style={{ fontFamily: "'Bebas Neue',sans-serif", fontSize: 24, color: badge.color || accentColor, letterSpacing: 1, marginBottom: 5 }}>{badge.msg}</div>
           {badge.sub && <div style={{ fontSize: 12, color: '#aaa' }}>{badge.sub}</div>}
         </div>
       )}
@@ -2296,7 +2805,7 @@ After searching, reply with ONLY a valid JSON array, no markdown:
 
 /* ── SERVICE WORKER ── */
 if ('serviceWorker' in navigator) {
-  const sw = `const C='drews-hub-v10';self.addEventListener('install',e=>{e.waitUntil(caches.open(C).then(c=>c.addAll(['.'])));self.skipWaiting();});self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==C).map(k=>caches.delete(k)))));self.clients.claim();});self.addEventListener('fetch',e=>{if(e.request.method!=='GET')return;const u=e.request.url;if(u.includes('api.anthropic.com')||u.includes('openfoodfacts')||u.includes('themealdb')||u.includes('fonts.googleapis')||u.includes('cdnjs'))return;e.respondWith(caches.match(e.request).then(r=>r||fetch(e.request).then(res=>{if(res&&res.ok){const cl=res.clone();caches.open(C).then(c=>c.put(e.request,cl));}return res;})));});`;
+  const sw = `const C='drews-hub-v11';self.addEventListener('install',e=>{e.waitUntil(caches.open(C).then(c=>c.addAll(['.'])));self.skipWaiting();});self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==C).map(k=>caches.delete(k)))));self.clients.claim();});self.addEventListener('fetch',e=>{if(e.request.method!=='GET')return;const u=e.request.url;if(u.includes('api.anthropic.com')||u.includes('openfoodfacts')||u.includes('themealdb')||u.includes('fonts.googleapis')||u.includes('cdnjs'))return;e.respondWith(caches.match(e.request).then(r=>r||fetch(e.request).then(res=>{if(res&&res.ok){const cl=res.clone();caches.open(C).then(c=>c.put(e.request,cl));}return res;})));});`;
   try { navigator.serviceWorker.register(URL.createObjectURL(new Blob([sw], { type: 'application/javascript' }))).catch(() => {}); } catch {}
 }
 
