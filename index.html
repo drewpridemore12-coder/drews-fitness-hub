@@ -3603,9 +3603,16 @@ Write a 4-sentence weekly review: 1) What went well (cite a specific number), 2)
     const [localSex,      setLocalSex]      = useState('male');
     const [localActivity, setLocalActivity] = useState('moderate');
     const [localBudget,   setLocalBudget]   = useState('150');
+    const [localAge,      setLocalAge]      = useState('');
+    const [localWeight,   setLocalWeight]   = useState('');
+    const [localHeight,   setLocalHeight]   = useState('');
+    const [localEmail,    setLocalEmail]    = useState('');
+    const [localPass,     setLocalPass]     = useState('');
+    const [obSigningUp,   setObSigningUp]   = useState(false);
+    const [obSignedUp,    setObSignedUp]    = useState(false);
     const avatarOptions = ['💪','🏋️','🔥','⚡','🦾','🥊','🏃','🧠','🎯','🥷','🦅','🌊','🐺','⚔️','🛡️','💎','🌟','🚀'];
-    // 6 steps: name, avatar, goal, body stats, activity, budget
-    const steps = ['Who are you?','Pick your avatar','Set your goal','Your body','Activity level','Your budget'];
+    // 7 steps: name, avatar, goal, body, activity, budget, cloud sync
+    const steps = ['Who are you?','Pick your avatar','Set your goal','Your body','Activity level','Your budget','Sync to cloud'];
     const canNext = step === 0 ? localName.trim().length >= 2 : true;
 
     function finish() {
@@ -3622,6 +3629,9 @@ Write a 4-sentence weekly review: 1) What went well (cite a specific number), 2)
       save('userSex',       localSex);
       save('activityLevel', localActivity);
       save('weekBudget',    parseFloat(localBudget) || 150);
+      if (localAge.trim())    { setUserAge(localAge.trim());       save('userAge',    localAge.trim()); }
+      if (localWeight.trim()) { setUserWeight(localWeight.trim()); save('userWeight', localWeight.trim()); }
+      if (localHeight.trim()) { setUserHeight(localHeight.trim()); save('userHeight', localHeight.trim()); }
       save('onboarded',     true);
       setOnboarded(true);
       setScreen('home');
@@ -3629,7 +3639,7 @@ Write a 4-sentence weekly review: 1) What went well (cite a specific number), 2)
     }
 
     const accent = '#4BDE80';
-    const stepEmojis = ['👋', localAvatar, GOAL_PRESETS[localGoal].emoji, localSex === 'female' ? '♀️' : '♂️', '🏃', '💰'];
+    const stepEmojis = ['👋', localAvatar, GOAL_PRESETS[localGoal].emoji, localSex === 'female' ? '♀️' : '♂️', '🏃', '💰', '☁️'];
     const stepSubs   = [
       'This is your personal fitness hub.',
       'Choose an avatar that represents you.',
@@ -3637,6 +3647,7 @@ Write a 4-sentence weekly review: 1) What went well (cite a specific number), 2)
       "We'll use this to calculate your exact calorie target.",
       "More accurate than any preset — we'll calculate your TDEE.",
       "We'll use this for meal planning & shopping.",
+      "Back up your progress and access it anywhere. Free.",
     ];
     return (
       <div style={{ height: '100%', overflowY: 'auto', background: 'linear-gradient(160deg,#0c1220 0%,#0c0c18 100%)', display: 'flex', flexDirection: 'column', padding: '0 24px' }}>
@@ -3697,21 +3708,36 @@ Write a 4-sentence weekly review: 1) What went well (cite a specific number), 2)
           </div>
         )}
 
-        {/* Step 3 — Body (sex picker) */}
+        {/* Step 3 — Body (sex + age + weight + height) */}
         {step === 3 && (
           <div>
             <div style={{ fontSize: 10, color: '#4a6a7a', letterSpacing: 1, marginBottom: 12, textAlign: 'center' }}>BIOLOGICAL SEX (for BMR accuracy)</div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 20 }}>
               {[{ id:'male', emoji:'♂', label:'Male' }, { id:'female', emoji:'♀', label:'Female' }].map(s => (
-                <button key={s.id} onClick={() => setLocalSex(s.id)} style={{ padding: '24px 16px', borderRadius: 20, border: `2px solid ${localSex === s.id ? accent : 'rgba(255,255,255,0.1)'}`, background: localSex === s.id ? `${accent}18` : 'rgba(255,255,255,0.03)', cursor: 'pointer', textAlign: 'center' }}>
-                  <div style={{ fontSize: 40, marginBottom: 8 }}>{s.emoji}</div>
-                  <div style={{ fontFamily:"'Oswald',sans-serif", fontSize: 18, fontWeight: 700, color: localSex === s.id ? accent : '#fff' }}>{s.label}</div>
+                <button key={s.id} onClick={() => setLocalSex(s.id)} style={{ padding: '20px 16px', borderRadius: 20, border: `2px solid ${localSex === s.id ? accent : 'rgba(255,255,255,0.1)'}`, background: localSex === s.id ? `${accent}18` : 'rgba(255,255,255,0.03)', cursor: 'pointer', textAlign: 'center' }}>
+                  <div style={{ fontSize: 36, marginBottom: 6 }}>{s.emoji}</div>
+                  <div style={{ fontFamily:"'Oswald',sans-serif", fontSize: 17, fontWeight: 700, color: localSex === s.id ? accent : '#fff' }}>{s.label}</div>
                 </button>
               ))}
             </div>
-            <div style={{ fontSize: 11, color: '#4a6a7a', textAlign: 'center' }}>
-              Used only for calorie calculation. You can change this later in Profile.
+            <div style={{ fontSize: 10, color: '#4a6a7a', letterSpacing: 1, marginBottom: 10, textAlign: 'center' }}>BODY STATS (for exact calorie target)</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginBottom: 10 }}>
+              <div style={{ background: 'rgba(255,255,255,0.04)', borderRadius: 14, padding: '12px 10px', border: '1px solid rgba(255,255,255,0.08)' }}>
+                <div style={{ fontSize: 9, color: '#4a6a7a', letterSpacing: 0.5, marginBottom: 6 }}>AGE</div>
+                <input value={localAge} onChange={e => setLocalAge(e.target.value)} placeholder="28" type="number" style={{ width: '100%', background: 'transparent', border: 'none', color: '#fff', fontSize: 22, fontFamily: "'Oswald',sans-serif", outline: 'none', fontWeight: 600 }} />
+                <div style={{ fontSize: 9, color: '#555', marginTop: 2 }}>yrs</div>
+              </div>
+              <div style={{ background: 'rgba(255,255,255,0.04)', borderRadius: 14, padding: '12px 10px', border: '1px solid rgba(255,255,255,0.08)' }}>
+                <div style={{ fontSize: 9, color: '#4a6a7a', letterSpacing: 0.5, marginBottom: 6 }}>WEIGHT</div>
+                <input value={localWeight} onChange={e => setLocalWeight(e.target.value)} placeholder="185" type="number" style={{ width: '100%', background: 'transparent', border: 'none', color: '#fff', fontSize: 22, fontFamily: "'Oswald',sans-serif", outline: 'none', fontWeight: 600 }} />
+                <div style={{ fontSize: 9, color: '#555', marginTop: 2 }}>lbs</div>
+              </div>
+              <div style={{ background: 'rgba(255,255,255,0.04)', borderRadius: 14, padding: '12px 10px', border: '1px solid rgba(255,255,255,0.08)' }}>
+                <div style={{ fontSize: 9, color: '#4a6a7a', letterSpacing: 0.5, marginBottom: 6 }}>HEIGHT</div>
+                <input value={localHeight} onChange={e => setLocalHeight(e.target.value)} placeholder="5'11" style={{ width: '100%', background: 'transparent', border: 'none', color: '#fff', fontSize: 15, fontFamily: "'Oswald',sans-serif", outline: 'none', fontWeight: 600, paddingTop: 3 }} />
+              </div>
             </div>
+            <div style={{ fontSize: 11, color: '#4a6a7a', textAlign: 'center' }}>Optional · you can fill these in Profile anytime</div>
           </div>
         )}
 
@@ -3761,17 +3787,59 @@ Write a 4-sentence weekly review: 1) What went well (cite a specific number), 2)
           </div>
         )}
 
+        {/* Step 6 — Sync to cloud */}
+        {step === 6 && (
+          <div>
+            {obSignedUp ? (
+              <div style={{ textAlign: 'center', padding: '10px 0 20px' }}>
+                <div style={{ fontSize: 56, marginBottom: 16 }}>✅</div>
+                <div style={{ fontFamily: "'Oswald',sans-serif", fontSize: 22, fontWeight: 700, color: accent, marginBottom: 10 }}>ACCOUNT CREATED!</div>
+                <div style={{ fontSize: 14, color: '#4a6a7a', lineHeight: 1.5 }}>Check your email to confirm your account.<br/>Then tap Let's Go below.</div>
+              </div>
+            ) : (
+              <div>
+                <input
+                  value={localEmail}
+                  onChange={e => setLocalEmail(e.target.value)}
+                  placeholder="Email address"
+                  type="email"
+                  style={{ width: '100%', padding: '14px 18px', borderRadius: 14, border: '1px solid rgba(255,255,255,0.1)', background: 'rgba(255,255,255,0.05)', color: '#fff', fontSize: 15, fontFamily: 'inherit', outline: 'none', marginBottom: 10, boxSizing: 'border-box' }}
+                />
+                <input
+                  value={localPass}
+                  onChange={e => setLocalPass(e.target.value)}
+                  placeholder="Password (min 6 chars)"
+                  type="password"
+                  style={{ width: '100%', padding: '14px 18px', borderRadius: 14, border: '1px solid rgba(255,255,255,0.1)', background: 'rgba(255,255,255,0.05)', color: '#fff', fontSize: 15, fontFamily: 'inherit', outline: 'none', marginBottom: 14, boxSizing: 'border-box' }}
+                />
+                <button
+                  disabled={obSigningUp || !localEmail.includes('@') || localPass.length < 6}
+                  onClick={async () => {
+                    if (!_sb) { showToast('Continuing offline — sign in anytime from Profile', 'info'); finish(); return; }
+                    setObSigningUp(true);
+                    const { error } = await _sb.auth.signUp({ email: localEmail, password: localPass });
+                    setObSigningUp(false);
+                    if (error) { showToast(error.message, 'error'); } else { setObSignedUp(true); }
+                  }}
+                  style={{ width: '100%', padding: 16, borderRadius: 16, border: 'none', background: (obSigningUp || !localEmail.includes('@') || localPass.length < 6) ? 'rgba(255,255,255,0.06)' : accent, color: (obSigningUp || !localEmail.includes('@') || localPass.length < 6) ? '#333' : '#000', fontFamily: "'Oswald',sans-serif", fontSize: 17, fontWeight: 800, cursor: 'pointer', marginBottom: 4, letterSpacing: 0.5 }}
+                >{obSigningUp ? 'CREATING ACCOUNT...' : '☁️ CREATE FREE ACCOUNT'}</button>
+                <div style={{ fontSize: 11, color: '#3a5a6a', textAlign: 'center', marginTop: 6 }}>Free forever · no credit card · 100% private</div>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Nav buttons */}
-        <div style={{ display: 'flex', gap: 12, marginTop: 40, paddingBottom: 'max(env(safe-area-inset-bottom),32px)' }}>
+        <div style={{ display: 'flex', gap: 12, marginTop: 36, paddingBottom: 'max(env(safe-area-inset-bottom),32px)' }}>
           {step > 0 && (
             <button onClick={() => setStep(s => s - 1)} style={{ flex: 1, padding: 16, borderRadius: 16, border: '1px solid rgba(255,255,255,0.1)', background: 'transparent', color: '#aaa', fontFamily: "'Oswald',sans-serif", fontSize: 16, fontWeight: 700, cursor: 'pointer', letterSpacing: 0.5 }}>← BACK</button>
           )}
           <button
-            onClick={() => step < 5 ? setStep(s => s + 1) : finish()}
+            onClick={() => step < 6 ? setStep(s => s + 1) : finish()}
             disabled={!canNext}
             style={{ flex: 2, padding: 16, borderRadius: 16, border: 'none', background: canNext ? accent : 'rgba(255,255,255,0.06)', color: canNext ? '#000' : '#333', fontFamily: "'Oswald',sans-serif", fontSize: 18, fontWeight: 800, cursor: canNext ? 'pointer' : 'not-allowed', letterSpacing: 1, transition: 'all 0.2s' }}
           >
-            {step < 5 ? 'NEXT →' : '🚀 LET\'S GO'}
+            {step < 6 ? 'NEXT →' : (obSignedUp ? "🚀 LET'S GO" : 'SKIP, SAVE LOCALLY →')}
           </button>
         </div>
       </div>
@@ -3962,17 +4030,35 @@ Write a 4-sentence weekly review: 1) What went well (cite a specific number), 2)
               {editMode ? (
                 <div style={{ marginBottom: 16 }}>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 8 }}>
-                    {[
-                      { label: 'Age',    val: lAge,    set: setLAge,    placeholder: 'e.g. 28',    unit: 'yrs' },
-                      { label: 'Weight', val: lWeight, set: setLWeight, placeholder: 'e.g. 185',   unit: 'lbs' },
-                      { label: 'Height', val: lHeight, set: setLHeight, placeholder: "e.g. 5'11\"", unit: '' },
-                    ].map(f => (
-                      <div key={f.label} style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 14, padding: 12, border: '1px solid rgba(255,255,255,0.06)' }}>
-                        <div style={{ fontSize: 9, color: '#4a6a7a', letterSpacing: 0.5, marginBottom: 6 }}>{f.label.toUpperCase()}</div>
-                        <input value={f.val} onChange={e => f.set(e.target.value)} placeholder={f.placeholder} style={{ width: '100%', background: 'transparent', border: 'none', color: '#fff', fontSize: 16, fontFamily: "'Oswald',sans-serif", outline: 'none', fontWeight: 600 }} />
-                        {f.unit && <div style={{ fontSize: 9, color: '#555', marginTop: 2 }}>{f.unit}</div>}
-                      </div>
-                    ))}
+                    <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 14, padding: 12, border: '1px solid rgba(255,255,255,0.06)' }}>
+                      <div style={{ fontSize: 9, color: '#4a6a7a', letterSpacing: 0.5, marginBottom: 6 }}>AGE</div>
+                      <input
+                        value={lAge}
+                        onChange={e => setLAge(e.target.value)}
+                        placeholder="e.g. 28"
+                        style={{ width: '100%', background: 'transparent', border: 'none', color: '#fff', fontSize: 16, fontFamily: "'Oswald',sans-serif", outline: 'none', fontWeight: 600 }}
+                      />
+                      <div style={{ fontSize: 9, color: '#555', marginTop: 2 }}>yrs</div>
+                    </div>
+                    <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 14, padding: 12, border: '1px solid rgba(255,255,255,0.06)' }}>
+                      <div style={{ fontSize: 9, color: '#4a6a7a', letterSpacing: 0.5, marginBottom: 6 }}>WEIGHT</div>
+                      <input
+                        value={lWeight}
+                        onChange={e => setLWeight(e.target.value)}
+                        placeholder="e.g. 185"
+                        style={{ width: '100%', background: 'transparent', border: 'none', color: '#fff', fontSize: 16, fontFamily: "'Oswald',sans-serif", outline: 'none', fontWeight: 600 }}
+                      />
+                      <div style={{ fontSize: 9, color: '#555', marginTop: 2 }}>lbs</div>
+                    </div>
+                    <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 14, padding: 12, border: '1px solid rgba(255,255,255,0.06)' }}>
+                      <div style={{ fontSize: 9, color: '#4a6a7a', letterSpacing: 0.5, marginBottom: 6 }}>HEIGHT</div>
+                      <input
+                        value={lHeight}
+                        onChange={e => setLHeight(e.target.value)}
+                        placeholder="e.g. 5'11&quot;"
+                        style={{ width: '100%', background: 'transparent', border: 'none', color: '#fff', fontSize: 16, fontFamily: "'Oswald',sans-serif", outline: 'none', fontWeight: 600 }}
+                      />
+                    </div>
                   </div>
                   {/* Sex selector */}
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
@@ -4842,7 +4928,7 @@ Write a 4-sentence weekly review: 1) What went well (cite a specific number), 2)
 
 /* ── SERVICE WORKER ── */
 if ('serviceWorker' in navigator) {
-  const sw = `const C='drews-hub-v23';self.addEventListener('install',e=>{e.waitUntil(caches.open(C).then(c=>c.addAll(['.'])));self.skipWaiting();});self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==C).map(k=>caches.delete(k)))));self.clients.claim();});self.addEventListener('fetch',e=>{if(e.request.method!=='GET')return;const u=e.request.url;if(u.includes('api.anthropic.com')||u.includes('openfoodfacts')||u.includes('themealdb')||u.includes('fonts.googleapis')||u.includes('cdnjs')||u.includes('supabase.co'))return;e.respondWith(caches.match(e.request).then(r=>r||fetch(e.request).then(res=>{if(res&&res.ok){const cl=res.clone();caches.open(C).then(c=>c.put(e.request,cl));}return res;})));});`;
+  const sw = `const C='drews-hub-v24';self.addEventListener('install',e=>{e.waitUntil(caches.open(C).then(c=>c.addAll(['.'])));self.skipWaiting();});self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==C).map(k=>caches.delete(k)))));self.clients.claim();});self.addEventListener('fetch',e=>{if(e.request.method!=='GET')return;const u=e.request.url;if(u.includes('api.anthropic.com')||u.includes('openfoodfacts')||u.includes('themealdb')||u.includes('fonts.googleapis')||u.includes('cdnjs')||u.includes('supabase.co'))return;e.respondWith(caches.match(e.request).then(r=>r||fetch(e.request).then(res=>{if(res&&res.ok){const cl=res.clone();caches.open(C).then(c=>c.put(e.request,cl));}return res;})));});`;
   try { navigator.serviceWorker.register(URL.createObjectURL(new Blob([sw], { type: 'application/javascript' }))).catch(() => {}); } catch {}
 }
 
