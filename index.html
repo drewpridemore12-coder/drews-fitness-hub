@@ -912,6 +912,7 @@ function FitnessHub() {
   const [levelMsgs,      setLevelMsgs]      = useState(() => load('levelMsgs', []));
   const [levelInput,     setLevelInput]     = useState('');
   const [levelTyping,    setLevelTyping]    = useState(false);
+  const levelChatEndRef = useRef(null);
 
   /* ── settings modal staging (synced from real state when modal opens) ── */
   const [sKey,       setSKey]       = useState('');
@@ -955,6 +956,7 @@ function FitnessHub() {
   useEffect(() => save('adjustDismissed',  adjustDismissed),  [adjustDismissed]);
   useEffect(() => save('pantry',           pantry),           [pantry]);
   useEffect(() => save('levelMsgs',        levelMsgs),        [levelMsgs]);
+  useEffect(() => { if (screen === 'level') levelChatEndRef.current?.scrollIntoView({ behavior:'smooth' }); }, [levelMsgs, levelTyping, screen]);
   /* sync settings staging state whenever the modal opens */
   useEffect(() => {
     if (showSettings) { setSKey(apiKey); setSUrl(vercelUrl); setSBudget(String(weekBudget)); setSVaultName(vaultName); }
@@ -1760,8 +1762,7 @@ Write a 4-sentence weekly review: 1) What went well (cite a specific number), 2)
 
   /* ── LEVEL SCREEN ── */
   function LevelScreen() {
-    const chatEndRef = useRef(null);
-    useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior:'smooth' }); }, [levelMsgs, levelTyping]);
+    const chatEndRef = levelChatEndRef; // hoisted to parent to avoid hooks-in-function violation
     const QUICK = [
       { label:'Post-workout',    msg:'I just finished my workout and I\'m hungry' },
       { label:'My progress',     msg:'How am I doing overall?' },
@@ -4841,7 +4842,7 @@ Write a 4-sentence weekly review: 1) What went well (cite a specific number), 2)
 
 /* ── SERVICE WORKER ── */
 if ('serviceWorker' in navigator) {
-  const sw = `const C='drews-hub-v22';self.addEventListener('install',e=>{e.waitUntil(caches.open(C).then(c=>c.addAll(['.'])));self.skipWaiting();});self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==C).map(k=>caches.delete(k)))));self.clients.claim();});self.addEventListener('fetch',e=>{if(e.request.method!=='GET')return;const u=e.request.url;if(u.includes('api.anthropic.com')||u.includes('openfoodfacts')||u.includes('themealdb')||u.includes('fonts.googleapis')||u.includes('cdnjs')||u.includes('supabase.co'))return;e.respondWith(caches.match(e.request).then(r=>r||fetch(e.request).then(res=>{if(res&&res.ok){const cl=res.clone();caches.open(C).then(c=>c.put(e.request,cl));}return res;})));});`;
+  const sw = `const C='drews-hub-v23';self.addEventListener('install',e=>{e.waitUntil(caches.open(C).then(c=>c.addAll(['.'])));self.skipWaiting();});self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==C).map(k=>caches.delete(k)))));self.clients.claim();});self.addEventListener('fetch',e=>{if(e.request.method!=='GET')return;const u=e.request.url;if(u.includes('api.anthropic.com')||u.includes('openfoodfacts')||u.includes('themealdb')||u.includes('fonts.googleapis')||u.includes('cdnjs')||u.includes('supabase.co'))return;e.respondWith(caches.match(e.request).then(r=>r||fetch(e.request).then(res=>{if(res&&res.ok){const cl=res.clone();caches.open(C).then(c=>c.put(e.request,cl));}return res;})));});`;
   try { navigator.serviceWorker.register(URL.createObjectURL(new Blob([sw], { type: 'application/javascript' }))).catch(() => {}); } catch {}
 }
 
