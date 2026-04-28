@@ -392,7 +392,7 @@ function BarcodeScanner({onScan, onClose}){
 }
 
 /* ── WORKOUT TIMER ── */
-function WorkoutTimerApp({onBack,onSave}){
+function WorkoutTimerApp({onBack,onSave,customRoutines=[]}){
   const [screen,setScreen]=useState("select");
   const [selectedDay,setSelectedDay]=useState(null);
   const [elapsed,setElapsed]=useState(0);
@@ -406,7 +406,8 @@ function WorkoutTimerApp({onBack,onSave}){
   const [inputWeight,setInputWeight]=useState("");
   const [summary,setSummary]=useState(null);
   const restRef=useRef(null); const elapsedRef=useRef(null); const audioCtx=useRef(null);
-  const workout=selectedDay!==null?WORKOUTS[selectedDay]:null;
+  const allWorkouts=[...WORKOUTS,...customRoutines];
+  const workout=selectedDay!==null?allWorkouts[selectedDay]:null;
   const exercise=workout?workout.exercises[exIdx]:null;
   const logsForEx=setLogs[exIdx]||[];
   const setsHit=logsForEx.length;
@@ -447,12 +448,27 @@ function WorkoutTimerApp({onBack,onSave}){
           <div style={{fontFamily:"'Oswald',sans-serif",fontSize:32,fontWeight:700,color:"#fff",letterSpacing:1,lineHeight:1.1}}>SELECT<br/><span style={{color:"#4A9EFF"}}>WORKOUT</span></div>
         </div>
         <div style={{display:"flex",flexDirection:"column",gap:12}}>
+          {WORKOUTS.length>0&&<div style={{fontSize:10,color:"#3a5a6a",letterSpacing:2,marginBottom:4}}>PRESET PROGRAMS</div>}
           {WORKOUTS.map((w,i)=>(
             <button key={i} onClick={()=>startSession(i)} style={{background:`linear-gradient(120deg,${w.color}18 0%,rgba(255,255,255,0.02) 100%)`,border:`1px solid ${w.color}40`,borderRadius:18,padding:"20px",cursor:"pointer",textAlign:"left",fontFamily:"inherit",width:"100%"}}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                 <div>
                   <div style={{fontSize:10,color:w.color,letterSpacing:2,fontWeight:700,marginBottom:6,textTransform:"uppercase"}}>{w.tag} · {w.day}</div>
                   <div style={{fontFamily:"'Oswald',sans-serif",fontSize:24,fontWeight:600,color:"#fff"}}>{w.focus}</div>
+                  <div style={{fontSize:12,color:"#3a5a6a",marginTop:4}}>{w.exercises.length} exercises</div>
+                </div>
+                <div style={{width:48,height:48,borderRadius:14,background:w.color,display:"flex",alignItems:"center",justifyContent:"center",fontSize:20,flexShrink:0,color:"#000",fontWeight:700}}>▶</div>
+              </div>
+            </button>
+          ))}
+          {customRoutines.length>0&&<div style={{fontSize:10,color:"#3a5a6a",letterSpacing:2,marginTop:8,marginBottom:4}}>MY ROUTINES</div>}
+          {customRoutines.map((w,ci)=>(
+            <button key={w.id||ci} onClick={()=>startSession(WORKOUTS.length+ci)} style={{background:`linear-gradient(120deg,${w.color}22 0%,rgba(255,255,255,0.02) 100%)`,border:`2px solid ${w.color}60`,borderRadius:18,padding:"20px",cursor:"pointer",textAlign:"left",fontFamily:"inherit",width:"100%",position:"relative"}}>
+              <div style={{position:"absolute",top:10,right:12,fontSize:9,color:w.color,fontWeight:700,letterSpacing:1,background:`${w.color}20`,padding:"2px 7px",borderRadius:6}}>MY ROUTINE</div>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                <div>
+                  <div style={{fontSize:10,color:w.color,letterSpacing:2,fontWeight:700,marginBottom:6,textTransform:"uppercase"}}>{w.tag}</div>
+                  <div style={{fontFamily:"'Oswald',sans-serif",fontSize:24,fontWeight:600,color:"#fff"}}>{w.name||w.focus}</div>
                   <div style={{fontSize:12,color:"#3a5a6a",marginTop:4}}>{w.exercises.length} exercises</div>
                 </div>
                 <div style={{width:48,height:48,borderRadius:14,background:w.color,display:"flex",alignItems:"center",justifyContent:"center",fontSize:20,flexShrink:0,color:"#000",fontWeight:700}}>▶</div>
@@ -914,6 +930,22 @@ function FitnessHub() {
   const [levelTyping,    setLevelTyping]    = useState(false);
   const levelChatEndRef = useRef(null);
 
+  /* ── Custom Routines ── */
+  const [customRoutines,   setCustomRoutines]   = useState(() => load('customRoutines', []));
+  const [showRoutineBuilder, setShowRoutineBuilder] = useState(false);
+  const [editingRoutine,   setEditingRoutine]   = useState(null);
+  /* routine builder fields — all hoisted (no hooks inside modal) */
+  const [rbName,     setRbName]     = useState('');
+  const [rbTag,      setRbTag]      = useState('PUSH');
+  const [rbColor,    setRbColor]    = useState('#FF6B4A');
+  const [rbExercises, setRbExercises] = useState([]);
+  const [rbExName,   setRbExName]   = useState('');
+  const [rbExSets,   setRbExSets]   = useState('3');
+  const [rbExReps,   setRbExReps]   = useState('10–12');
+  const [rbExRest,   setRbExRest]   = useState('60');
+  const [rbSuggesting, setRbSuggesting] = useState(false);
+  const [rbGenerating, setRbGenerating] = useState(false);
+
   /* ── settings modal staging (synced from real state when modal opens) ── */
   const [sKey,       setSKey]       = useState('');
   const [sUrl,       setSUrl]       = useState('');
@@ -956,6 +988,7 @@ function FitnessHub() {
   useEffect(() => save('adjustDismissed',  adjustDismissed),  [adjustDismissed]);
   useEffect(() => save('pantry',           pantry),           [pantry]);
   useEffect(() => save('levelMsgs',        levelMsgs),        [levelMsgs]);
+  useEffect(() => save('customRoutines',   customRoutines),   [customRoutines]);
   useEffect(() => { if (screen === 'level') levelChatEndRef.current?.scrollIntoView({ behavior:'smooth' }); }, [levelMsgs, levelTyping, screen]);
   /* sync settings staging state whenever the modal opens */
   useEffect(() => {
@@ -1555,6 +1588,9 @@ Write a 4-sentence weekly review: 1) What went well (cite a specific number), 2)
       pantryItems: pantry.map(p => p.name),
       topPRs: Object.entries(prs).sort((a, b) => b[1] - a[1]).slice(0, 3),
       savedCount: saved.length,
+      hasCustomRoutines: customRoutines.length > 0,
+      customRoutineCount: customRoutines.length,
+      customRoutineNames: customRoutines.map(r => r.name),
     };
   }
 
@@ -1571,6 +1607,7 @@ Write a 4-sentence weekly review: 1) What went well (cite a specific number), 2)
     if (m.includes('tired') || m.includes('sore') || m.includes('recover') || m.includes('exhausted') || m.includes('sleep')) return 'recovery';
     if (m.includes('budget') || m.includes('money') || m.includes('cheap') || m.includes('afford') || m.includes('expensive')) return 'budget';
     if (m.includes('pr') || m.includes('personal record') || m.includes('strongest') || m.includes('max') || m.includes('bench') || m.includes('squat') || m.includes('deadlift')) return 'strength';
+    if (m.includes('routine') || m.includes('program') || m.includes('build me') || m.includes('make me') || m.includes('create') || m.includes('workout plan') || m.includes('training plan') || m.includes('make a') || m.includes('build a')) return 'buildRoutine';
     return 'general';
   }
 
@@ -1709,6 +1746,32 @@ Write a 4-sentence weekly review: 1) What went well (cite a specific number), 2)
           why: `Batch cooking 2-3x/week cuts grocery spend by 30-40% vs daily meal prep.`,
         };
       }
+      case 'buildRoutine': {
+        if (!state.hasCustomRoutines) {
+          return {
+            insight: `You don't have a custom routine yet. LEVEL will build one tailored to your ${state.goalLabel} goal.`,
+            decision: `Open the Routine Builder and tap "Let LEVEL Build My Routine" — it will generate a full program based on your goal, level, and history.`,
+            options: [
+              `Your goal: ${state.goalLabel} → LEVEL will match volume and intensity`,
+              `Your level: ${state.levelEmoji} ${state.levelName} → appropriate exercise selection`,
+              `${state.workoutsWk} workouts this week logged → LEVEL knows your current capacity`,
+            ],
+            why: `A structured program beats random training every time. Your routine becomes your baseline — LEVEL then coaches you on top of it.`,
+            cta: 'open_routine_builder',
+          };
+        }
+        return {
+          insight: `You have ${state.customRoutineCount} custom routine${state.customRoutineCount !== 1 ? 's' : ''}: ${state.customRoutineNames.join(', ')}.`,
+          decision: `Edit your existing routines or create a new one. LEVEL can suggest exercises to add or remove based on your goal.`,
+          options: [
+            `Open Routine Builder to edit or add routines`,
+            `LEVEL can suggest exercises for any routine`,
+            `Use the Train tab → select and start any routine`,
+          ],
+          why: `Revisiting your program every 6-8 weeks prevents adaptation plateaus.`,
+          cta: 'open_routine_builder',
+        };
+      }
       default: {
         return {
           insight: `Current status: ${state.totalCal}/${state.goalCal} kcal · ${state.pctPro}% protein · ${state.streak}-day streak.`,
@@ -1752,7 +1815,7 @@ Write a 4-sentence weekly review: 1) What went well (cite a specific number), 2)
           if (ai?.trim()) response += `\n\n💬 ${ai.trim()}`;
         } catch(e) { /* AI is optional — never break the response */ }
       }
-      setLevelMsgs(p => [...p, { role:'level', text:response, ts:Date.now() }]);
+      setLevelMsgs(p => [...p, { role:'level', text:response, ts:Date.now(), cta: decision.cta || null }]);
     } catch(e) {
       setLevelMsgs(p => [...p, { role:'level', text:`System error. Check your data and try again.`, ts:Date.now() }]);
     } finally {
@@ -1764,6 +1827,9 @@ Write a 4-sentence weekly review: 1) What went well (cite a specific number), 2)
   function LevelScreen() {
     const chatEndRef = levelChatEndRef; // hoisted to parent to avoid hooks-in-function violation
     const QUICK = [
+      customRoutines.length === 0
+        ? { label:'🏗️ Build my routine', msg:'Build me a workout routine for my goal' }
+        : { label:'My routine',          msg:'What should I change in my workout routine?' },
       { label:'Post-workout',    msg:'I just finished my workout and I\'m hungry' },
       { label:'My progress',     msg:'How am I doing overall?' },
       { label:'Should I adjust?', msg:'Should I adjust my calories?' },
@@ -1850,7 +1916,22 @@ Write a 4-sentence weekly review: 1) What went well (cite a specific number), 2)
               }}>
                 {m.role === 'user'
                   ? <div style={{ fontSize:13, color:'#000', fontWeight:600 }}>{m.text}</div>
-                  : <div>{renderMsg(m.text)}</div>
+                  : <div>
+                      {renderMsg(m.text)}
+                      {m.cta === 'open_routine_builder' && (
+                        <button
+                          onClick={() => {
+                            setRbName(''); setRbTag('PUSH'); setRbColor('#FF6B4A');
+                            setRbExercises([]); setRbExName(''); setRbExSets('3');
+                            setRbExReps('10–12'); setRbExRest('60');
+                            setEditingRoutine(null);
+                            setShowRoutineBuilder(true);
+                          }}
+                          style={{ marginTop:10, width:'100%', padding:'9px 14px', borderRadius:10, border:'1px solid rgba(168,85,247,0.5)', background:'rgba(168,85,247,0.15)', color:'#A855F7', fontFamily:"'Oswald',sans-serif", fontSize:13, fontWeight:700, cursor:'pointer', letterSpacing:0.5 }}>
+                          🏗️ OPEN ROUTINE BUILDER
+                        </button>
+                      )}
+                    </div>
                 }
               </div>
             </div>
@@ -2764,8 +2845,8 @@ Write a 4-sentence weekly review: 1) What went well (cite a specific number), 2)
     return (
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         <div style={{ display: 'flex', padding: '0 16px', paddingTop: 16, flexShrink: 0 }}>
-          {[['today', 'TODAY'], ['history', 'HISTORY'], ['coach', 'AI COACH']].map(([k, l]) => (
-            <button key={k} onClick={() => setTrainTab(k)} style={{ flex: 1, padding: '10px 4px', border: 'none', borderBottom: `2px solid ${trainTab === k ? '#FF6B4A' : 'rgba(255,255,255,0.06)'}`, background: 'transparent', color: trainTab === k ? '#FF6B4A' : '#555', fontFamily: "'Oswald',sans-serif", fontSize: 12, fontWeight: 600, cursor: 'pointer', letterSpacing: 1 }}>
+          {[['today', 'TODAY'], ['routines', 'ROUTINES'], ['history', 'HISTORY'], ['coach', 'AI COACH']].map(([k, l]) => (
+            <button key={k} onClick={() => setTrainTab(k)} style={{ flex: 1, padding: '10px 2px', border: 'none', borderBottom: `2px solid ${trainTab === k ? '#FF6B4A' : 'rgba(255,255,255,0.06)'}`, background: 'transparent', color: trainTab === k ? '#FF6B4A' : '#555', fontFamily: "'Oswald',sans-serif", fontSize: 11, fontWeight: 600, cursor: 'pointer', letterSpacing: 0.5 }}>
               {l}
             </button>
           ))}
@@ -2773,7 +2854,83 @@ Write a 4-sentence weekly review: 1) What went well (cite a specific number), 2)
 
         {trainTab === 'today' && (
           <div style={{ flex: 1, overflow: 'hidden' }}>
-            <WorkoutTimerApp onBack={() => setTrainTab('today')} onSave={saveWorkoutSession} />
+            <WorkoutTimerApp onBack={() => setTrainTab('today')} onSave={saveWorkoutSession} customRoutines={customRoutines} />
+          </div>
+        )}
+
+        {trainTab === 'routines' && (
+          <div style={{ flex: 1, overflowY: 'auto', padding: '14px 16px' }}>
+            {/* Header */}
+            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16 }}>
+              <div>
+                <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:22, color:'#fff', letterSpacing:1 }}>MY ROUTINES</div>
+                <div style={{ fontSize:11, color:'#4a6a7a' }}>{customRoutines.length} custom · {WORKOUTS.length} preset</div>
+              </div>
+              <button onClick={() => {
+                setRbName(''); setRbTag('PUSH'); setRbColor('#FF6B4A');
+                setRbExercises([]); setRbExName(''); setRbExSets('3');
+                setRbExReps('10–12'); setRbExRest('60');
+                setEditingRoutine(null);
+                setShowRoutineBuilder(true);
+              }} style={{ padding:'10px 16px', borderRadius:12, border:'none', background:'#FF6B4A', color:'#000', fontFamily:"'Oswald',sans-serif", fontSize:14, fontWeight:700, cursor:'pointer' }}>+ NEW</button>
+            </div>
+
+            {/* No routines empty state */}
+            {customRoutines.length === 0 && (
+              <div style={{ background:'rgba(168,85,247,0.08)', borderRadius:18, padding:'20px 18px', border:'1px solid rgba(168,85,247,0.2)', marginBottom:14, textAlign:'center' }}>
+                <div style={{ fontSize:36, marginBottom:10 }}>🧠</div>
+                <div style={{ fontFamily:"'Oswald',sans-serif", fontSize:16, color:'#fff', marginBottom:6 }}>NO ROUTINES YET</div>
+                <div style={{ fontSize:12, color:'#555', lineHeight:1.6, marginBottom:14 }}>
+                  Tap "+ NEW" to build your own, or let LEVEL generate a complete program based on your goal.
+                </div>
+                <button onClick={() => {
+                  setRbName(''); setRbTag('PUSH'); setRbColor('#FF6B4A');
+                  setRbExercises([]); setRbExName(''); setRbExSets('3');
+                  setRbExReps('10–12'); setRbExRest('60');
+                  setEditingRoutine(null);
+                  setShowRoutineBuilder(true);
+                }} style={{ padding:'11px 20px', borderRadius:12, border:'1px solid rgba(168,85,247,0.5)', background:'rgba(168,85,247,0.15)', color:'#A855F7', fontFamily:"'Oswald',sans-serif", fontSize:14, fontWeight:700, cursor:'pointer' }}>
+                  🧠 LET LEVEL BUILD MY ROUTINE
+                </button>
+              </div>
+            )}
+
+            {/* Custom routines */}
+            {customRoutines.map((r, i) => (
+              <div key={r.id||i} style={{ background:`linear-gradient(120deg,${r.color}12,rgba(255,255,255,0.02))`, borderRadius:16, padding:'14px 16px', marginBottom:10, border:`1px solid ${r.color}35` }}>
+                <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:8 }}>
+                  <div>
+                    <div style={{ fontSize:9, color:r.color, letterSpacing:2, fontWeight:700, marginBottom:3 }}>{r.tag} · CUSTOM</div>
+                    <div style={{ fontFamily:"'Oswald',sans-serif", fontSize:18, color:'#fff', fontWeight:700 }}>{r.name}</div>
+                    <div style={{ fontSize:11, color:'#555', marginTop:2 }}>{r.exercises.length} exercises</div>
+                  </div>
+                  <button onClick={() => {
+                    setEditingRoutine(r);
+                    setRbName(r.name); setRbTag(r.tag); setRbColor(r.color);
+                    setRbExercises([...r.exercises]);
+                    setRbExName(''); setRbExSets('3'); setRbExReps('10–12'); setRbExRest('60');
+                    setShowRoutineBuilder(true);
+                  }} style={{ padding:'7px 12px', borderRadius:10, border:'1px solid rgba(255,255,255,0.12)', background:'rgba(255,255,255,0.05)', color:'#aaa', fontSize:12, cursor:'pointer', fontFamily:'inherit' }}>✏️ EDIT</button>
+                </div>
+                <div style={{ display:'flex', flexWrap:'wrap', gap:5 }}>
+                  {r.exercises.slice(0,5).map((ex, j) => (
+                    <div key={j} style={{ fontSize:10, color:'#666', background:'rgba(255,255,255,0.04)', padding:'3px 8px', borderRadius:6, border:'1px solid rgba(255,255,255,0.06)' }}>{ex.name}</div>
+                  ))}
+                  {r.exercises.length > 5 && <div style={{ fontSize:10, color:'#444', padding:'3px 8px' }}>+{r.exercises.length-5} more</div>}
+                </div>
+              </div>
+            ))}
+
+            {/* Preset routines */}
+            <div style={{ fontSize:10, color:'#4a6a7a', letterSpacing:1, marginTop:16, marginBottom:8 }}>BUILT-IN PROGRAMS</div>
+            {WORKOUTS.map((w, i) => (
+              <div key={i} style={{ background:'rgba(255,255,255,0.02)', borderRadius:14, padding:'12px 14px', marginBottom:8, border:'1px solid rgba(255,255,255,0.05)' }}>
+                <div style={{ fontSize:9, color:w.color, letterSpacing:2, fontWeight:700, marginBottom:3 }}>{w.tag} · {w.day}</div>
+                <div style={{ fontFamily:"'Oswald',sans-serif", fontSize:16, color:'#aaa' }}>{w.focus}</div>
+                <div style={{ fontSize:11, color:'#444', marginTop:2 }}>{w.exercises.length} exercises</div>
+              </div>
+            ))}
+            <div style={{ height:80 }} />
           </div>
         )}
 
@@ -4730,6 +4887,233 @@ Write a 4-sentence weekly review: 1) What went well (cite a specific number), 2)
   }
 
   /* ── DAILY CHECK-IN MODAL ── */
+  /* ══════════════════════════════════════════════
+     ROUTINE BUILDER MODAL
+  ══════════════════════════════════════════════ */
+  function RoutineBuilderModal() {
+    const TAG_OPTS   = ['PUSH','PULL','LOWER','UPPER','FULL BODY','CARDIO','CUSTOM'];
+    const CLR_OPTS   = ['#FF6B4A','#4A9EFF','#F5C842','#B06BFF','#4BDE80','#EC4899','#06B6D4','#10B981'];
+
+    async function aiSuggest() {
+      setRbSuggesting(true);
+      const existing = rbExercises.map(e => e.name).join(', ');
+      const prompt = `You are a strength coach. Suggest 3 exercises to ADD to this ${rbTag} workout called "${rbName || 'unnamed'}".
+Current exercises: ${existing || 'none yet'}.
+User goal: ${userGoal}. User level: ${getLevelInfo(userXP).name}.
+Return ONLY a JSON array: [{"name":"...","sets":3,"reps":"10-12","rest":60}]
+No explanation, just JSON.`;
+      const resp = await callClaude([{role:'user',content:prompt}], 400, 'claude-haiku-4-5-20251001');
+      setRbSuggesting(false);
+      if (resp) {
+        try {
+          const arr = JSON.parse(resp.match(/\[[\s\S]*?\]/)?.[0] || '[]');
+          if (arr.length > 0) {
+            setRbExercises(prev => [...prev, ...arr.slice(0,3).map(e => ({
+              name: String(e.name||'Exercise'), sets: parseInt(e.sets)||3, reps: String(e.reps||'10-12'), rest: parseInt(e.rest)||60
+            }))]);
+            showToast(`Added ${Math.min(arr.length,3)} AI suggestions ✓`, 'success');
+          }
+        } catch(e) { showToast('Could not parse AI suggestions', 'error'); }
+      }
+    }
+
+    async function aiGenerate() {
+      setRbGenerating(true);
+      const lv = getLevelInfo(userXP);
+      const prompt = `You are a strength coach. Create a complete ${rbTag} workout routine.
+User: goal=${userGoal}, level=${lv.name}, workouts/week=${customRoutines.length > 0 ? '4+' : '3-4'}.
+Return ONLY JSON: {"name":"...","focus":"...","exercises":[{"name":"...","sets":3,"reps":"10-12","rest":60}]}
+Include 5-7 exercises. No explanation, just JSON.`;
+      const resp = await callClaude([{role:'user',content:prompt}], 700, 'claude-haiku-4-5-20251001');
+      setRbGenerating(false);
+      if (resp) {
+        try {
+          const obj = JSON.parse(resp.match(/\{[\s\S]*\}/)?.[0] || '{}');
+          if (obj.exercises?.length > 0) {
+            if (!rbName) setRbName(obj.name || `${rbTag} Day`);
+            setRbExercises(obj.exercises.map(e => ({
+              name: String(e.name||'Exercise'), sets: parseInt(e.sets)||3, reps: String(e.reps||'10-12'), rest: parseInt(e.rest)||60
+            })));
+            showToast('LEVEL built your routine ✓', 'success');
+          }
+        } catch(e) { showToast('Generation failed — try again', 'error'); }
+      }
+    }
+
+    function saveRoutine() {
+      if (!rbName.trim())         return showToast('Give your routine a name', 'error');
+      if (rbExercises.length < 1) return showToast('Add at least 1 exercise', 'error');
+      const routine = {
+        id:        editingRoutine?.id || Date.now(),
+        name:      rbName.trim(),
+        tag:       rbTag,
+        color:     rbColor,
+        focus:     rbName.trim(),
+        day:       'Custom',
+        isCustom:  true,
+        exercises: rbExercises,
+      };
+      if (editingRoutine) {
+        setCustomRoutines(prev => prev.map(r => r.id === editingRoutine.id ? routine : r));
+        showToast('Routine updated ✓', 'success');
+      } else {
+        setCustomRoutines(prev => [...prev, routine]);
+        addXP(20);
+        showToast('Routine saved! +20 XP 💪', 'success');
+      }
+      setShowRoutineBuilder(false);
+    }
+
+    function addExercise() {
+      if (!rbExName.trim()) return;
+      setRbExercises(prev => [...prev, {
+        name: rbExName.trim(), sets: parseInt(rbExSets)||3,
+        reps: rbExReps||'10-12', rest: parseInt(rbExRest)||60,
+      }]);
+      setRbExName(''); setRbExSets('3'); setRbExReps('10–12'); setRbExRest('60');
+    }
+
+    return (
+      <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.92)', zIndex:996, display:'flex', alignItems:'flex-end', justifyContent:'center' }}
+        onClick={e => { if (e.target === e.currentTarget) setShowRoutineBuilder(false); }}>
+        <div style={{ width:'100%', maxWidth:500, background:'#0f1520', borderRadius:'24px 24px 0 0', padding:'22px 18px 36px', maxHeight:'93vh', overflowY:'auto' }}>
+
+          {/* Header */}
+          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:18 }}>
+            <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:24, color:'#fff', letterSpacing:1 }}>
+              {editingRoutine ? 'EDIT ROUTINE' : 'NEW ROUTINE'}
+            </div>
+            <button onClick={() => setShowRoutineBuilder(false)} style={{ background:'none', border:'none', color:'#555', fontSize:22, cursor:'pointer', padding:'2px 6px' }}>✕</button>
+          </div>
+
+          {/* Name */}
+          <div style={{ fontSize:9, color:'#4a6a7a', letterSpacing:1, marginBottom:5 }}>ROUTINE NAME</div>
+          <input
+            value={rbName}
+            onChange={e => setRbName(e.target.value)}
+            placeholder="e.g. My Push Day, Leg Destroyer..."
+            style={{ width:'100%', padding:'12px 14px', borderRadius:12, border:'1px solid rgba(255,255,255,0.1)', background:'rgba(255,255,255,0.05)', color:'#fff', fontSize:15, fontFamily:'inherit', outline:'none', marginBottom:14, boxSizing:'border-box' }}
+          />
+
+          {/* Tag + Color */}
+          <div style={{ display:'grid', gridTemplateColumns:'1fr auto', gap:12, marginBottom:16 }}>
+            <div>
+              <div style={{ fontSize:9, color:'#4a6a7a', letterSpacing:1, marginBottom:6 }}>TYPE</div>
+              <div style={{ display:'flex', flexWrap:'wrap', gap:5 }}>
+                {TAG_OPTS.map(t => (
+                  <button key={t} onClick={() => setRbTag(t)}
+                    style={{ padding:'5px 9px', borderRadius:8, border:`1px solid ${rbTag===t ? '#FF6B4A' : 'rgba(255,255,255,0.1)'}`, background: rbTag===t ? 'rgba(255,107,74,0.15)' : 'transparent', color: rbTag===t ? '#FF6B4A' : '#666', fontSize:10, fontWeight:700, cursor:'pointer' }}>
+                    {t}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div>
+              <div style={{ fontSize:9, color:'#4a6a7a', letterSpacing:1, marginBottom:6 }}>COLOR</div>
+              <div style={{ display:'flex', flexWrap:'wrap', gap:5, maxWidth:88 }}>
+                {CLR_OPTS.map(c => (
+                  <button key={c} onClick={() => setRbColor(c)}
+                    style={{ width:26, height:26, borderRadius:'50%', background:c, border:`3px solid ${rbColor===c ? '#fff' : 'transparent'}`, cursor:'pointer', flexShrink:0 }} />
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* AI Generate button */}
+          <button onClick={aiGenerate} disabled={rbGenerating}
+            style={{ width:'100%', padding:'12px 14px', borderRadius:12, border:'1px solid rgba(168,85,247,0.5)', background:'rgba(168,85,247,0.12)', color:'#A855F7', fontFamily:"'Oswald',sans-serif", fontSize:14, fontWeight:700, cursor: rbGenerating?'not-allowed':'pointer', marginBottom:16, letterSpacing:0.5 }}>
+            {rbGenerating ? '🧠 BUILDING YOUR ROUTINE...' : '🧠 LET LEVEL BUILD MY ROUTINE'}
+          </button>
+
+          {/* Exercise list */}
+          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:8 }}>
+            <div style={{ fontSize:9, color:'#4a6a7a', letterSpacing:1 }}>EXERCISES ({rbExercises.length})</div>
+            {rbExercises.length > 0 && (
+              <button onClick={aiSuggest} disabled={rbSuggesting}
+                style={{ fontSize:10, padding:'4px 10px', borderRadius:8, border:'1px solid rgba(75,222,128,0.3)', background:'rgba(75,222,128,0.08)', color:'#4BDE80', cursor: rbSuggesting?'not-allowed':'pointer', fontWeight:700, fontFamily:'inherit' }}>
+                {rbSuggesting ? '...' : '✨ AI SUGGEST MORE'}
+              </button>
+            )}
+          </div>
+
+          {rbExercises.length === 0 && (
+            <div style={{ fontSize:12, color:'#333', textAlign:'center', padding:'12px 0 14px', border:'1px dashed rgba(255,255,255,0.07)', borderRadius:12, marginBottom:12 }}>
+              No exercises yet — add below or let LEVEL generate your program ↑
+            </div>
+          )}
+
+          {rbExercises.map((ex, i) => (
+            <div key={i} style={{ display:'flex', alignItems:'center', gap:8, padding:'10px 12px', background:'rgba(255,255,255,0.03)', borderRadius:12, marginBottom:6, border:'1px solid rgba(255,255,255,0.06)' }}>
+              <div style={{ width:22, height:22, borderRadius:6, background:rbColor+'30', display:'flex', alignItems:'center', justifyContent:'center', fontSize:10, color:rbColor, fontWeight:700, flexShrink:0 }}>{i+1}</div>
+              <div style={{ flex:1, minWidth:0 }}>
+                <div style={{ fontSize:13, color:'#ddd', fontWeight:600, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{ex.name}</div>
+                <div style={{ fontSize:10, color:'#555', marginTop:1 }}>{ex.sets} sets · {ex.reps} reps · {ex.rest}s rest</div>
+              </div>
+              <button onClick={() => setRbExercises(prev => prev.filter((_,j) => j !== i))}
+                style={{ background:'none', border:'none', color:'#444', fontSize:16, cursor:'pointer', padding:'3px 5px', flexShrink:0 }}>✕</button>
+            </div>
+          ))}
+
+          {/* Add exercise form */}
+          <div style={{ background:'rgba(255,255,255,0.02)', borderRadius:14, padding:'12px 12px', border:'1px solid rgba(255,255,255,0.06)', marginTop:8, marginBottom:16 }}>
+            <div style={{ fontSize:9, color:'#4a6a7a', letterSpacing:1, marginBottom:8 }}>ADD EXERCISE</div>
+            <input
+              value={rbExName}
+              onChange={e => setRbExName(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && addExercise()}
+              placeholder="Exercise name (e.g. Bench Press)"
+              style={{ width:'100%', padding:'10px 12px', borderRadius:10, border:'1px solid rgba(255,255,255,0.08)', background:'rgba(255,255,255,0.04)', color:'#fff', fontSize:14, fontFamily:'inherit', outline:'none', marginBottom:8, boxSizing:'border-box' }}
+            />
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:6, marginBottom:8 }}>
+              <div>
+                <div style={{ fontSize:9, color:'#4a6a7a', marginBottom:3 }}>SETS</div>
+                <input
+                  type="number" value={rbExSets} onChange={e => setRbExSets(e.target.value)}
+                  style={{ width:'100%', padding:'8px 10px', borderRadius:8, border:'1px solid rgba(255,255,255,0.08)', background:'rgba(255,255,255,0.04)', color:'#fff', fontSize:14, fontFamily:'inherit', outline:'none', boxSizing:'border-box' }}
+                />
+              </div>
+              <div>
+                <div style={{ fontSize:9, color:'#4a6a7a', marginBottom:3 }}>REPS</div>
+                <input
+                  value={rbExReps} onChange={e => setRbExReps(e.target.value)}
+                  style={{ width:'100%', padding:'8px 10px', borderRadius:8, border:'1px solid rgba(255,255,255,0.08)', background:'rgba(255,255,255,0.04)', color:'#fff', fontSize:14, fontFamily:'inherit', outline:'none', boxSizing:'border-box' }}
+                />
+              </div>
+              <div>
+                <div style={{ fontSize:9, color:'#4a6a7a', marginBottom:3 }}>REST (s)</div>
+                <input
+                  type="number" value={rbExRest} onChange={e => setRbExRest(e.target.value)}
+                  style={{ width:'100%', padding:'8px 10px', borderRadius:8, border:'1px solid rgba(255,255,255,0.08)', background:'rgba(255,255,255,0.04)', color:'#fff', fontSize:14, fontFamily:'inherit', outline:'none', boxSizing:'border-box' }}
+                />
+              </div>
+            </div>
+            <button onClick={addExercise} disabled={!rbExName.trim()}
+              style={{ width:'100%', padding:'10px 14px', borderRadius:10, border:'none', background: rbExName.trim() ? rbColor : 'rgba(255,255,255,0.06)', color: rbExName.trim() ? '#000' : '#333', fontFamily:"'Oswald',sans-serif", fontSize:14, fontWeight:700, cursor: rbExName.trim()?'pointer':'not-allowed', letterSpacing:0.5 }}>
+              + ADD EXERCISE
+            </button>
+          </div>
+
+          {/* Save */}
+          <button onClick={saveRoutine}
+            style={{ width:'100%', padding:15, borderRadius:16, border:'none', background:'#4BDE80', color:'#000', fontFamily:"'Oswald',sans-serif", fontSize:17, fontWeight:800, cursor:'pointer', letterSpacing:0.5, marginBottom: editingRoutine ? 10 : 0 }}>
+            💾 SAVE ROUTINE
+          </button>
+
+          {/* Delete (edit mode only) */}
+          {editingRoutine && (
+            <button onClick={() => {
+              setCustomRoutines(prev => prev.filter(r => r.id !== editingRoutine.id));
+              setShowRoutineBuilder(false);
+              showToast('Routine deleted', 'info');
+            }} style={{ width:'100%', padding:13, borderRadius:14, border:'1px solid rgba(255,100,100,0.3)', background:'rgba(255,80,80,0.08)', color:'#ff6b6b', fontFamily:"'Oswald',sans-serif", fontSize:14, fontWeight:700, cursor:'pointer', letterSpacing:0.5 }}>
+              🗑 DELETE ROUTINE
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   function DailyCheckInModal() {
     const SliderRow = ({ label, value, set, min=1, max=10, color='#4BDE80' }) => (
       <div style={{ marginBottom: 16 }}>
@@ -4877,6 +5261,7 @@ Write a 4-sentence weekly review: 1) What went well (cite a specific number), 2)
       {showSettings && SettingsModal()}
       {showAuth && AuthModal()}
       {showCheckIn && DailyCheckInModal()}
+      {showRoutineBuilder && RoutineBuilderModal()}
 
       {/* ── PENDING CHALLENGE MODAL ── */}
       {pendingChallenge && (
@@ -4928,7 +5313,7 @@ Write a 4-sentence weekly review: 1) What went well (cite a specific number), 2)
 
 /* ── SERVICE WORKER ── */
 if ('serviceWorker' in navigator) {
-  const sw = `const C='drews-hub-v25';self.addEventListener('install',e=>{e.waitUntil(caches.open(C).then(c=>c.addAll(['.'])));self.skipWaiting();});self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==C).map(k=>caches.delete(k)))));self.clients.claim();});self.addEventListener('fetch',e=>{if(e.request.method!=='GET')return;const u=e.request.url;if(u.includes('api.anthropic.com')||u.includes('openfoodfacts')||u.includes('themealdb')||u.includes('fonts.googleapis')||u.includes('cdnjs')||u.includes('supabase.co'))return;e.respondWith(caches.match(e.request).then(r=>r||fetch(e.request).then(res=>{if(res&&res.ok){const cl=res.clone();caches.open(C).then(c=>c.put(e.request,cl));}return res;})));});`;
+  const sw = `const C='drews-hub-v26';self.addEventListener('install',e=>{e.waitUntil(caches.open(C).then(c=>c.addAll(['.'])));self.skipWaiting();});self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==C).map(k=>caches.delete(k)))));self.clients.claim();});self.addEventListener('fetch',e=>{if(e.request.method!=='GET')return;const u=e.request.url;if(u.includes('api.anthropic.com')||u.includes('openfoodfacts')||u.includes('themealdb')||u.includes('fonts.googleapis')||u.includes('cdnjs')||u.includes('supabase.co'))return;e.respondWith(caches.match(e.request).then(r=>r||fetch(e.request).then(res=>{if(res&&res.ok){const cl=res.clone();caches.open(C).then(c=>c.put(e.request,cl));}return res;})));});`;
   try { navigator.serviceWorker.register(URL.createObjectURL(new Blob([sw], { type: 'application/javascript' }))).catch(() => {}); } catch {}
 }
 
