@@ -908,6 +908,10 @@ function FitnessHub() {
   const [pantryInput, setPantryInput] = useState('');
   /* ── strength chart ── */
   const [selectedExercise, setSelectedExercise] = useState('');
+  /* ── LEVEL chat ── */
+  const [levelMsgs,      setLevelMsgs]      = useState(() => load('levelMsgs', []));
+  const [levelInput,     setLevelInput]     = useState('');
+  const [levelTyping,    setLevelTyping]    = useState(false);
 
   /* ── settings modal staging (synced from real state when modal opens) ── */
   const [sKey,       setSKey]       = useState('');
@@ -950,6 +954,7 @@ function FitnessHub() {
   useEffect(() => save('weeklyReview',     weeklyReview),     [weeklyReview]);
   useEffect(() => save('adjustDismissed',  adjustDismissed),  [adjustDismissed]);
   useEffect(() => save('pantry',           pantry),           [pantry]);
+  useEffect(() => save('levelMsgs',        levelMsgs),        [levelMsgs]);
   /* sync settings staging state whenever the modal opens */
   useEffect(() => {
     if (showSettings) { setSKey(apiKey); setSUrl(vercelUrl); setSBudget(String(weekBudget)); setSVaultName(vaultName); }
@@ -1499,6 +1504,396 @@ Write a 4-sentence weekly review: 1) What went well (cite a specific number), 2)
             Need 2+ sessions with {chosen} to show chart
           </div>
         )}
+      </div>
+    );
+  }
+
+  /* ══════════════════════════════════════════════
+     LEVEL — CONVERSATIONAL DECISION ENGINE
+  ══════════════════════════════════════════════ */
+
+  /* ── LAYER 1: State Builder ── */
+  function buildUserState() {
+    const today = todayStr();
+    const todayEntries = load('entries_' + today, []);
+    const totalCal  = todayEntries.reduce((a, e) => a + (e.calories || 0), 0);
+    const totalPro  = todayEntries.reduce((a, e) => a + (e.protein  || 0), 0);
+    const calLeft   = Math.max(0, goal.cal - totalCal);
+    const proLeft   = Math.max(0, goal.protein - totalPro);
+    const pctCal    = goal.cal     > 0 ? Math.round(totalCal / goal.cal * 100)     : 0;
+    const pctPro    = goal.protein > 0 ? Math.round(totalPro / goal.protein * 100) : 0;
+    const lastSession = vault.length > 0 ? vault[vault.length - 1] : null;
+    const hrsSince    = lastSession ? (Date.now() - new Date(lastSession.date).getTime()) / 3600000 : 999;
+    const todayCI     = getTodayCheckIn();
+    const trend       = getWeightTrend(14);
+    const wkStart     = new Date(); wkStart.setDate(wkStart.getDate() - wkStart.getDay());
+    const workoutsWk  = vault.filter(s => new Date(s.date) >= wkStart).length;
+    let streak = 0;
+    for (let i = 0; i < 30; i++) {
+      const d = new Date(); d.setDate(d.getDate() - i);
+      const ds = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+      if (load('entries_' + ds, []).length > 0) streak++; else break;
+    }
+    const lv = getLevelInfo(userXP);
+    // Best exercise PRs (top 3)
+    const prs = {};
+    vault.forEach(s => (s.exercises || []).forEach(ex => {
+      const maxW = Math.max(0, ...(ex.sets || []).map(st => parseFloat(st.weight) || 0));
+      if (maxW > 0 && (!prs[ex.name] || maxW > prs[ex.name])) prs[ex.name] = maxW;
+    }));
+    return {
+      today, goalLabel: goal.label, goalCal: goal.cal, goalProtein: goal.protein,
+      totalCal, totalPro, calLeft, proLeft, pctCal, pctPro,
+      workoutsWk, lastSession, hrsSince, inPostWorkout: hrsSince < 2,
+      energyLevel: todayCI?.energy ?? null, hungerLevel: todayCI?.hunger ?? null,
+      dietScore: todayCI?.dietScore ?? null,
+      weightTrend: trend, currentWeight: parseFloat(userWeight) || null,
+      streak, xp: userXP, level: lv.level, levelName: lv.name, levelEmoji: lv.emoji,
+      userName: userName || 'You', userGoal, weekBudget,
+      pantryItems: pantry.map(p => p.name),
+      topPRs: Object.entries(prs).sort((a, b) => b[1] - a[1]).slice(0, 3),
+      savedCount: saved.length,
+    };
+  }
+
+  /* ── LAYER 2: Intent Parser ── */
+  function parseIntent(msg) {
+    const m = msg.toLowerCase();
+    if ((m.includes('finish') || m.includes('just did') || m.includes('done')) && (m.includes('workout') || m.includes('gym') || m.includes('lift'))) return 'postWorkout';
+    if (m.includes('hungry') || m.includes('snack') || m.includes('what should i eat') || m.includes('what to eat') || m.includes('eat something')) return 'snack';
+    if (m.includes('dinner') || m.includes('breakfast') || m.includes('lunch') || m.includes('meal plan') || m.includes('what to cook')) return 'meal';
+    if (m.includes('should i work') || m.includes('train today') || m.includes('skip') || m.includes('rest day') || m.includes('gym today')) return 'workout';
+    if (m.includes('progress') || m.includes('how am i') || m.includes('doing') || m.includes('results') || m.includes('on track')) return 'progress';
+    if (m.includes('calorie') || m.includes('macro') || m.includes('protein') || m.includes('carb') || m.includes('nutrition') || m.includes('fat')) return 'nutrition';
+    if (m.includes('plateau') || m.includes('stall') || m.includes('adjust') || m.includes('should i change') || m.includes('not losing') || m.includes('not gaining')) return 'adjust';
+    if (m.includes('tired') || m.includes('sore') || m.includes('recover') || m.includes('exhausted') || m.includes('sleep')) return 'recovery';
+    if (m.includes('budget') || m.includes('money') || m.includes('cheap') || m.includes('afford') || m.includes('expensive')) return 'budget';
+    if (m.includes('pr') || m.includes('personal record') || m.includes('strongest') || m.includes('max') || m.includes('bench') || m.includes('squat') || m.includes('deadlift')) return 'strength';
+    return 'general';
+  }
+
+  /* ── LAYER 3: Rule Engine ── */
+  function runRules(intent, state) {
+    const rules = [];
+    if (state.pctPro < 50) rules.push({ type:'lowProtein', pri:8, msg:`Only ${state.pctPro}% protein hit (${state.totalPro}/${state.goalProtein}g)` });
+    if (state.pctCal > 95) rules.push({ type:'calMax', pri:5, msg:`Calories maxed: ${state.totalCal}/${state.goalCal} kcal` });
+    if (state.calLeft > 600 && state.pctCal < 60) rules.push({ type:'underEating', pri:7, msg:`${state.calLeft} kcal under-eaten today — risk muscle loss` });
+    if (state.workoutsWk === 0) rules.push({ type:'noWorkouts', pri:7, msg:'Zero workouts logged this week' });
+    if (state.workoutsWk >= 5) rules.push({ type:'highVol', pri:4, msg:`${state.workoutsWk} sessions this week — recovery priority` });
+    if (state.inPostWorkout) rules.push({ type:'postWorkout', pri:10, msg:`Post-workout window open (${Math.round(state.hrsSince * 60)} min ago)` });
+    if (state.streak >= 3) rules.push({ type:'streak', pri:4, msg:`${state.streak}-day streak — protect it` });
+    if (state.streak === 0) rules.push({ type:'noStreak', pri:5, msg:'Log streak broken — restart today' });
+    if (state.weightTrend) {
+      const { delta } = state.weightTrend;
+      if (state.userGoal === 'cut'    && delta >  0.5) rules.push({ type:'gainOnCut',    pri:9, msg:`Gaining on cut (+${delta}lbs) — deficit too small` });
+      if (state.userGoal === 'cut'    && Math.abs(delta) < 0.25 && state.weightTrend.days >= 12) rules.push({ type:'plateau', pri:7, msg:`Weight stalled — consider dropping 150 cal` });
+      if (state.userGoal === 'bulk'   && delta < 0) rules.push({ type:'losingOnBulk', pri:9, msg:`Losing on bulk (${delta}lbs) — surplus too small` });
+      if (state.userGoal === 'recomp' && Math.abs(delta) > 1) rules.push({ type:'recompDrift', pri:6, msg:`Weight shifting ±${Math.abs(delta)}lbs on recomp — review intake` });
+    }
+    if (state.energyLevel !== null && state.energyLevel <= 4) rules.push({ type:'lowEnergy', pri:7, msg:`Energy ${state.energyLevel}/10 — recovery mode` });
+    if (state.dietScore !== null && state.dietScore <= 4) rules.push({ type:'lowDiet', pri:6, msg:`Diet adherence ${state.dietScore}/10 — tighten up` });
+    return rules.sort((a, b) => b.pri - a.pri);
+  }
+
+  /* ── LAYER 4: Decision Engine ── */
+  function makeDecision(intent, rules, state) {
+    const topRule = rules[0];
+    switch (intent) {
+      case 'postWorkout':
+      case 'snack': {
+        const isPost = state.inPostWorkout || intent === 'postWorkout';
+        const proTarget = Math.min(state.proLeft, isPost ? 40 : 30);
+        const opts = [...saved, ...SEED_RECIPES]
+          .map(r => ({ ...r, _s: (r.protein||0)*2 + ((r.calories||r.cal||0) <= state.calLeft ? 5 : -3) + (isPost && (r.protein||0) >= 30 ? 8 : 0) }))
+          .sort((a,b) => b._s - a._s).slice(0,3)
+          .map(r => `${r.name} — ${r.protein||0}g P / ${r.calories||r.cal||0} kcal`);
+        return {
+          insight: isPost
+            ? `Post-workout window active. You burned through glycogen — protein synthesis is peaked.`
+            : `Hunger signal detected. You have ${state.proLeft}g protein and ${state.calLeft} kcal remaining today.`,
+          decision: `Hit ${proTarget}g+ protein${isPost ? ' within 45 minutes' : ' at your next meal'}.`,
+          options: opts.length ? opts : [`Protein shake + banana`, `Chicken + rice bowl`, `Greek yogurt with fruit`],
+          why: isPost ? `Post-workout protein (30-50g) maximizes muscle protein synthesis within the 2-hour window.` : `Front-loading protein prevents evening over-eating and preserves muscle mass.`,
+        };
+      }
+      case 'workout': {
+        const energyOk = state.energyLevel === null || state.energyLevel >= 6;
+        const rested   = state.hrsSince > 18;
+        return {
+          insight: `${state.workoutsWk} session${state.workoutsWk !== 1?'s':''} this week. ${state.lastSession ? `Last: ${state.lastSession.focus||state.lastSession.day} (${Math.round(state.hrsSince)}h ago)` : 'No recent sessions.'}`,
+          decision: !energyOk ? `Energy at ${state.energyLevel}/10 — light session or active recovery only.`
+            : !rested ? `Only ${Math.round(state.hrsSince)}h since last session. Hit an opposing muscle group.`
+            : `System go. Train at full intensity.`,
+          options: energyOk && rested
+            ? [`Full session — scheduled workout`, `HIIT finisher (20-30 min)`, `Extra volume on lagging muscle group`]
+            : [`Active recovery: 20-min walk + mobility`, `Bodyweight only — protect joints`, `Full rest — max out protein + sleep`],
+          why: `Based on ${state.hrsSince < 999 ? Math.round(state.hrsSince) + 'h recovery' : 'no recent session'}, energy ${state.energyLevel ?? 'unknown'}/10, ${state.workoutsWk} workouts this week.`,
+        };
+      }
+      case 'progress': {
+        const t = state.weightTrend;
+        const tMsg = !t ? 'No weight data' : t.delta < -0.3 ? `↓ ${Math.abs(t.delta)}lbs` : t.delta > 0.3 ? `↑ ${t.delta}lbs` : '→ Stable';
+        return {
+          insight: `${state.levelEmoji} Lv.${state.level} ${state.levelName} · ${state.streak}-day streak · ${state.workoutsWk} workouts this week.`,
+          decision: topRule ? topRule.msg : `Solid consistency. Maintain current trajectory.`,
+          options: [
+            `Calories: ${state.totalCal}/${state.goalCal} (${state.pctCal}%)`,
+            `Protein: ${state.totalPro}/${state.goalProtein}g (${state.pctPro}%)`,
+            `Weight: ${tMsg} over ${t?.days ?? 0} days`,
+            `Workouts: ${state.workoutsWk}/wk  |  Streak: ${state.streak} days`,
+          ],
+          why: rules.length > 0 ? `Priority flags: ${rules.slice(0,2).map(r=>r.msg).join(', ')}` : null,
+        };
+      }
+      case 'strength': {
+        const prs = state.topPRs;
+        return {
+          insight: `Lifetime PRs from ${vault.length} logged sessions.`,
+          decision: prs.length ? `Top lift: ${prs[0][0]} at ${prs[0][1]}lb. Focus progressive overload — add 5lb when you hit all target reps.` : `No weight data yet. Log sets with weights to track PRs.`,
+          options: prs.length ? prs.map(([name, w]) => `${name}: ${w}lb max`) : [`Start logging weights in your workout sessions`],
+          why: `Progressive overload (2-5% weekly weight increase) is the primary driver of strength gains.`,
+        };
+      }
+      case 'nutrition':
+      case 'meal': {
+        return {
+          insight: `Today: ${state.totalCal} kcal / ${state.goalCal} target · ${state.totalPro}g / ${state.goalProtein}g protein.`,
+          decision: state.pctPro < 50
+            ? `Protein critical — ${state.proLeft}g left to hit target. Every meal needs 30g+.`
+            : state.calLeft < 150
+            ? `Calories maxed. Any remaining intake should be pure protein.`
+            : `${state.calLeft} kcal and ${state.proLeft}g protein remaining. Stay on plan.`,
+          options: state.pantryItems.length
+            ? [`Use pantry: ${state.pantryItems.slice(0,4).join(', ')}`, `Check Recipes tab for high-protein options`, `AI Meal Plan → Planner screen`]
+            : [`Log your next meal for accurate tracking`, `High-protein recipes in the Recipes tab`, `Run AI Meal Plan in the Planner`],
+          why: `Consistent logging is the #1 predictor of goal achievement.`,
+        };
+      }
+      case 'adjust': {
+        const adj = computeAutoAdjust();
+        if (adj) return {
+          insight: `${adj.icon} ${adj.title}: ${adj.msg}`,
+          decision: adj.actionLabel || `Monitor for another 7 days before adjusting.`,
+          options: adj.actionLabel
+            ? [`Apply LEVEL's suggestion (${adj.actionLabel})`, `Hold for 7 more days`, `Focus on consistency first`]
+            : [`Keep current calories for 1 more week`, `Increase workout frequency`, `Tighten diet tracking`],
+          why: `LEVEL uses 14 days of weight data + 7 days of check-ins before recommending changes.`,
+        };
+        return {
+          insight: `Not enough data for a recommendation yet.`,
+          decision: `Need 2+ weeks of weight entries and daily check-ins for LEVEL to make an adjustment call.`,
+          options: [`Log weight in your daily check-in`, `Keep hitting ${state.goalCal} kcal consistently`],
+          why: null,
+        };
+      }
+      case 'recovery': {
+        return {
+          insight: `Energy: ${state.energyLevel !== null ? state.energyLevel+'/10' : 'not logged today'}. Last session: ${state.lastSession ? Math.round(state.hrsSince)+'h ago' : 'no data'}.`,
+          decision: state.energyLevel !== null && state.energyLevel <= 4
+            ? `Low energy confirmed. Full rest or active recovery today.`
+            : `Standard recovery protocol. Prioritize protein + sleep.`,
+          options: [`Hit protein goal: ${state.goalProtein}g total`, `7-9 hours sleep`, `Light mobility work if restless`],
+          why: `Muscle growth happens during recovery, not during training. Protein + rest = adaptation.`,
+        };
+      }
+      case 'budget': {
+        const remaining = state.weekBudget - 0; // simplified
+        return {
+          insight: `Weekly budget: $${state.weekBudget}. Pantry items on hand: ${state.pantryItems.length}.`,
+          decision: `Build meals around your pantry first to cut costs.`,
+          options: state.pantryItems.length
+            ? [`Use owned ingredients: ${state.pantryItems.slice(0,4).join(', ')}`, `Batch cook: rice + protein + frozen veg`, `Check AI Meal Plan — it respects your budget`]
+            : [`Add pantry items in the Planner screen`, `Batch cook ground beef/turkey`, `Frozen veg + rice = cheapest protein base`],
+          why: `Batch cooking 2-3x/week cuts grocery spend by 30-40% vs daily meal prep.`,
+        };
+      }
+      default: {
+        return {
+          insight: `Current status: ${state.totalCal}/${state.goalCal} kcal · ${state.pctPro}% protein · ${state.streak}-day streak.`,
+          decision: topRule ? topRule.msg : `On track. Stay consistent.`,
+          options: rules.slice(0,3).map(r => r.msg),
+          why: null,
+        };
+      }
+    }
+  }
+
+  /* ── LAYER 5: Response Formatter ── */
+  function formatDecision(d) {
+    let out = '';
+    if (d.insight)        out += `**Insight**\n${d.insight}\n\n`;
+    if (d.decision)       out += `**Decision**\n${d.decision}\n\n`;
+    if (d.options?.length) out += `**Options**\n${d.options.map((o,i)=>`${i+1}. ${o}`).join('\n')}\n\n`;
+    if (d.why)            out += `**Why**\n${d.why}`;
+    return out.trim();
+  }
+
+  /* ── LAYER 6: Message Handler ── */
+  async function sendLevelMessage(rawMsg) {
+    const msg = (rawMsg || levelInput).trim();
+    if (!msg || levelTyping) return;
+    setLevelMsgs(p => [...p, { role:'user', text:msg, ts:Date.now() }]);
+    setLevelInput('');
+    setLevelTyping(true);
+    try {
+      const state    = buildUserState();
+      const intent   = parseIntent(msg);
+      const rules    = runRules(intent, state);
+      const decision = makeDecision(intent, rules, state);
+      let   response = formatDecision(decision);
+      // AI explanation layer — only for complex/open-ended questions
+      const needsAI  = ['general','recovery','adjust','progress'].includes(intent) || msg.split(' ').length > 6;
+      if (needsAI) {
+        try {
+          const stateSnap = `Goal:${state.goalLabel} | Cal:${state.totalCal}/${state.goalCal} | Pro:${state.totalPro}/${state.goalProtein}g | Streak:${state.streak} | Workouts/wk:${state.workoutsWk} | Energy:${state.energyLevel??'?'}/10 | Weight trend:${state.weightTrend ? (state.weightTrend.delta>0?'+':'')+state.weightTrend.delta+'lbs/'+state.weightTrend.days+'d' : 'N/A'}`;
+          const ai = await callClaude([{ role:'user', content:`You are LEVEL, a sharp no-nonsense AI fitness coach. User message: "${msg}"\nUser data: ${stateSnap}\nDecision engine already produced: "${decision.decision}"\nAdd 1-2 sentences of direct, personalized coaching — no fluff, no repeating the data above.` }], 150);
+          if (ai?.trim()) response += `\n\n💬 ${ai.trim()}`;
+        } catch(e) { /* AI is optional — never break the response */ }
+      }
+      setLevelMsgs(p => [...p, { role:'level', text:response, ts:Date.now() }]);
+    } catch(e) {
+      setLevelMsgs(p => [...p, { role:'level', text:`System error. Check your data and try again.`, ts:Date.now() }]);
+    } finally {
+      setLevelTyping(false);
+    }
+  }
+
+  /* ── LEVEL SCREEN ── */
+  function LevelScreen() {
+    const chatEndRef = useRef(null);
+    useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior:'smooth' }); }, [levelMsgs, levelTyping]);
+    const QUICK = [
+      { label:'Post-workout',    msg:'I just finished my workout and I\'m hungry' },
+      { label:'My progress',     msg:'How am I doing overall?' },
+      { label:'Should I adjust?', msg:'Should I adjust my calories?' },
+      { label:'Energy check',    msg:'I\'m tired, should I train today?' },
+      { label:'What to eat?',    msg:'What should I eat right now?' },
+      { label:'My PRs',          msg:'What are my strength PRs?' },
+    ];
+
+    // Simple markdown-ish renderer
+    function renderMsg(text) {
+      const lines = text.split('\n');
+      return lines.map((line, i) => {
+        if (line.startsWith('**') && line.endsWith('**')) {
+          return <div key={i} style={{ fontSize:10, color:accentColor, fontWeight:700, letterSpacing:1, marginTop: i>0?10:0, marginBottom:2 }}>{line.replace(/\*\*/g,'').toUpperCase()}</div>;
+        }
+        if (/^\d+\. /.test(line)) {
+          return <div key={i} style={{ fontSize:13, color:'#ddd', paddingLeft:8, marginBottom:3, display:'flex', gap:6 }}>
+            <span style={{ color:accentColor, fontWeight:700, flexShrink:0 }}>{line.match(/^\d+/)[0]}.</span>
+            <span>{line.replace(/^\d+\. /,'')}</span>
+          </div>;
+        }
+        if (line.startsWith('💬 ')) {
+          return <div key={i} style={{ fontSize:12, color:'#aaa', fontStyle:'italic', marginTop:8, paddingTop:8, borderTop:'1px solid rgba(255,255,255,0.06)' }}>{line}</div>;
+        }
+        if (line.startsWith('_') && line.endsWith('_')) {
+          return <div key={i} style={{ fontSize:10, color:'#555', marginTop:6 }}>{line.replace(/_/g,'')}</div>;
+        }
+        if (!line.trim()) return <div key={i} style={{ height:4 }} />;
+        return <div key={i} style={{ fontSize:13, color:'#ddd', lineHeight:1.5 }}>{line}</div>;
+      });
+    }
+
+    const lv = getLevelInfo(userXP);
+    return (
+      <div style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden' }}>
+        {/* Header */}
+        <div style={{ padding:'14px 16px 12px', background:'linear-gradient(135deg,rgba(74,158,255,0.15) 0%,rgba(168,85,247,0.15) 100%)', borderBottom:'1px solid rgba(255,255,255,0.08)', flexShrink:0 }}>
+          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+            <div style={{ display:'flex', alignItems:'center', gap:10 }}>
+              <div style={{ width:36, height:36, borderRadius:12, background:'linear-gradient(135deg,#4A9EFF,#A855F7)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:18 }}>🧠</div>
+              <div>
+                <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:22, letterSpacing:2, color:'#fff', lineHeight:1 }}>LEVEL</div>
+                <div style={{ fontSize:9, color:'#4a6a7a', letterSpacing:1 }}>DECISION ENGINE · ONLINE</div>
+              </div>
+            </div>
+            <div style={{ textAlign:'right' }}>
+              <div style={{ fontSize:12, fontWeight:700, color:accentColor }}>{lv.emoji} Lv.{lv.level}</div>
+              <button onClick={() => setLevelMsgs([])} style={{ fontSize:9, color:'#444', background:'none', border:'none', cursor:'pointer', padding:'2px 0' }}>CLEAR</button>
+            </div>
+          </div>
+        </div>
+
+        {/* Messages */}
+        <div style={{ flex:1, overflowY:'auto', padding:'14px 16px' }}>
+          {levelMsgs.length === 0 && (
+            <div style={{ textAlign:'center', padding:'30px 0 20px' }}>
+              <div style={{ fontSize:40, marginBottom:10 }}>🧠</div>
+              <div style={{ fontFamily:"'Oswald',sans-serif", fontSize:16, color:'#fff', marginBottom:6 }}>LEVEL is ready</div>
+              <div style={{ fontSize:12, color:'#555', lineHeight:1.6, maxWidth:260, margin:'0 auto' }}>
+                Ask about your nutrition, workout readiness, progress, or what to eat — LEVEL reads your real data first.
+              </div>
+            </div>
+          )}
+          {/* Quick action chips */}
+          {levelMsgs.length === 0 && (
+            <div style={{ display:'flex', flexWrap:'wrap', gap:7, justifyContent:'center', marginBottom:20 }}>
+              {QUICK.map((q, i) => (
+                <button key={i} onClick={() => sendLevelMessage(q.msg)}
+                  style={{ padding:'7px 13px', borderRadius:20, border:'1px solid rgba(255,255,255,0.12)', background:'rgba(255,255,255,0.04)', color:'#aaa', fontSize:12, cursor:'pointer' }}>
+                  {q.label}
+                </button>
+              ))}
+            </div>
+          )}
+          {levelMsgs.map((m, i) => (
+            <div key={i} style={{ display:'flex', justifyContent: m.role==='user' ? 'flex-end' : 'flex-start', marginBottom:12 }}>
+              {m.role === 'level' && (
+                <div style={{ width:28, height:28, borderRadius:9, background:'linear-gradient(135deg,#4A9EFF,#A855F7)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:14, flexShrink:0, marginRight:8, alignSelf:'flex-end' }}>🧠</div>
+              )}
+              <div style={{
+                maxWidth:'82%', padding:'11px 14px', borderRadius: m.role==='user' ? '18px 18px 4px 18px' : '4px 18px 18px 18px',
+                background: m.role==='user' ? `linear-gradient(135deg,${accentColor},${accentColor}cc)` : 'rgba(255,255,255,0.05)',
+                border: m.role==='user' ? 'none' : '1px solid rgba(255,255,255,0.08)',
+              }}>
+                {m.role === 'user'
+                  ? <div style={{ fontSize:13, color:'#000', fontWeight:600 }}>{m.text}</div>
+                  : <div>{renderMsg(m.text)}</div>
+                }
+              </div>
+            </div>
+          ))}
+          {levelTyping && (
+            <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:12 }}>
+              <div style={{ width:28, height:28, borderRadius:9, background:'linear-gradient(135deg,#4A9EFF,#A855F7)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:14, flexShrink:0 }}>🧠</div>
+              <div style={{ background:'rgba(255,255,255,0.05)', border:'1px solid rgba(255,255,255,0.08)', borderRadius:'4px 18px 18px 18px', padding:'11px 16px', display:'flex', gap:4, alignItems:'center' }}>
+                {[0,1,2].map(j => (
+                  <div key={j} style={{ width:6, height:6, borderRadius:'50%', background:accentColor, opacity:0.7, animation:'pulse 1.2s ease-in-out infinite', animationDelay:`${j*0.2}s` }} />
+                ))}
+              </div>
+            </div>
+          )}
+          <div ref={chatEndRef} />
+          <div style={{ height:80 }} />
+        </div>
+
+        {/* Input */}
+        <div style={{ padding:'10px 14px', background:'rgba(10,10,20,0.95)', borderTop:'1px solid rgba(255,255,255,0.08)', flexShrink:0, paddingBottom:'max(env(safe-area-inset-bottom),10px)' }}>
+          {/* Quick chips when chat is active */}
+          {levelMsgs.length > 0 && (
+            <div style={{ display:'flex', gap:6, overflowX:'auto', marginBottom:8, paddingBottom:2 }}>
+              {QUICK.slice(0,4).map((q,i) => (
+                <button key={i} onClick={() => sendLevelMessage(q.msg)} style={{ flexShrink:0, padding:'5px 10px', borderRadius:16, border:'1px solid rgba(255,255,255,0.1)', background:'rgba(255,255,255,0.04)', color:'#888', fontSize:11, cursor:'pointer', whiteSpace:'nowrap' }}>
+                  {q.label}
+                </button>
+              ))}
+            </div>
+          )}
+          <div style={{ display:'flex', gap:8 }}>
+            <input
+              value={levelInput}
+              onChange={e => setLevelInput(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && !e.shiftKey && sendLevelMessage()}
+              placeholder="Ask LEVEL anything…"
+              style={{ flex:1, background:'rgba(255,255,255,0.06)', border:'1px solid rgba(255,255,255,0.12)', borderRadius:14, padding:'12px 14px', color:'#fff', fontSize:14, outline:'none', fontFamily:'inherit' }}
+            />
+            <button onClick={() => sendLevelMessage()} disabled={levelTyping || !levelInput.trim()}
+              style={{ width:46, height:46, borderRadius:14, border:'none', background: levelInput.trim() ? 'linear-gradient(135deg,#4A9EFF,#A855F7)' : 'rgba(255,255,255,0.06)', color: levelInput.trim() ? '#fff' : '#333', fontSize:20, cursor: levelInput.trim() ? 'pointer' : 'default', flexShrink:0, display:'flex', alignItems:'center', justifyContent:'center', transition:'all 0.15s' }}>
+              ↑
+            </button>
+          </div>
+        </div>
       </div>
     );
   }
@@ -2230,19 +2625,24 @@ Write a 4-sentence weekly review: 1) What went well (cite a specific number), 2)
           const lv = getLevelInfo(userXP);
           const hasCi = checkIns.some(c => c.date === todayStr());
           return (
-            <div style={{ background:'rgba(255,255,255,0.03)', borderRadius:16, padding:'12px 16px', border:`1px solid ${hasCi ? accentColor+'30' : 'rgba(255,165,0,0.3)'}`, marginBottom:14, display:'flex', justifyContent:'space-between', alignItems:'center', cursor: hasCi ? 'default' : 'pointer' }}
-              onClick={() => !hasCi && setShowCheckIn(true)}>
-              <div style={{ display:'flex', alignItems:'center', gap:10 }}>
+            <div style={{ background:'rgba(255,255,255,0.03)', borderRadius:16, padding:'12px 16px', border:`1px solid ${hasCi ? accentColor+'30' : 'rgba(255,165,0,0.3)'}`, marginBottom:10, display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+              <div style={{ display:'flex', alignItems:'center', gap:10, cursor: hasCi ? 'default' : 'pointer' }}
+                onClick={() => !hasCi && setShowCheckIn(true)}>
                 <div style={{ fontSize:22 }}>{lv.emoji}</div>
                 <div>
                   <div style={{ fontSize:12, fontWeight:700, color:'#fff' }}>{lv.name} · Lv.{lv.level}</div>
                   <div style={{ fontSize:10, color:'#555' }}>{userXP.toLocaleString()} XP</div>
                 </div>
               </div>
-              {hasCi
-                ? <div style={{ fontSize:10, color:accentColor, fontWeight:700 }}>✓ CHECKED IN</div>
-                : <div style={{ fontSize:11, color:'#F5C842', fontWeight:700 }}>📋 CHECK IN +10 XP</div>
-              }
+              <div style={{ display:'flex', gap:8, alignItems:'center' }}>
+                {hasCi
+                  ? <div style={{ fontSize:10, color:accentColor, fontWeight:700 }}>✓ IN</div>
+                  : <button onClick={() => setShowCheckIn(true)} style={{ fontSize:10, color:'#F5C842', fontWeight:700, background:'none', border:'none', cursor:'pointer', padding:0 }}>📋 +10XP</button>
+                }
+                <button onClick={() => setScreen('level')} style={{ padding:'6px 12px', borderRadius:20, border:'1px solid rgba(74,158,255,0.4)', background:'rgba(74,158,255,0.1)', color:'#4A9EFF', fontSize:11, fontWeight:700, cursor:'pointer', fontFamily:"'Oswald',sans-serif", letterSpacing:0.5 }}>
+                  🧠 LEVEL
+                </button>
+              </div>
             </div>
           );
         })()}
@@ -4310,7 +4710,7 @@ Write a 4-sentence weekly review: 1) What went well (cite a specific number), 2)
     { id: 'home',    icon: '🏠',  label: 'Home'    },
     { id: 'log',     icon: '🍽️', label: 'Log'     },
     { id: 'train',   icon: '💪',  label: 'Train'   },
-    { id: 'cook',    icon: '📖',  label: 'Recipes' },
+    { id: 'level',   icon: '🧠',  label: 'LEVEL'   },
     { id: 'plan',    icon: '📅',  label: 'Plan'    },
     { id: 'shop',    icon: '🛒',  label: 'Shop'    },
     { id: 'profile', icon: userAvatar, label: 'Me' },
@@ -4333,6 +4733,7 @@ Write a 4-sentence weekly review: 1) What went well (cite a specific number), 2)
         @import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Oswald:wght@400;500;600;700&display=swap');
         .pop{animation:popIn 0.3s cubic-bezier(0.175,0.885,0.32,1.275) both;}
         @keyframes popIn{from{transform:scale(0.85);opacity:0}to{transform:scale(1);opacity:1}}
+        @keyframes pulse{0%,100%{transform:scale(0.7);opacity:0.4}50%{transform:scale(1);opacity:1}}
         input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;}
         ::-webkit-scrollbar{width:2px;}::-webkit-scrollbar-track{background:transparent;}::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.1);border-radius:2px;}
       `}</style>
@@ -4348,6 +4749,7 @@ Write a 4-sentence weekly review: 1) What went well (cite a specific number), 2)
         {screen === 'shop'       && ShoppingScreen()}
         {screen === 'profile'    && ProfileScreen()}
         {screen === 'challenges' && ChallengesScreen()}
+        {screen === 'level'      && LevelScreen()}
       </div>
 
       <div style={{ display: 'flex', background: 'rgba(10,10,20,0.98)', borderTop: '1px solid rgba(255,255,255,0.06)', paddingBottom: 'max(env(safe-area-inset-bottom),4px)', flexShrink: 0 }}>
@@ -4435,7 +4837,7 @@ Write a 4-sentence weekly review: 1) What went well (cite a specific number), 2)
 
 /* ── SERVICE WORKER ── */
 if ('serviceWorker' in navigator) {
-  const sw = `const C='drews-hub-v20';self.addEventListener('install',e=>{e.waitUntil(caches.open(C).then(c=>c.addAll(['.'])));self.skipWaiting();});self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==C).map(k=>caches.delete(k)))));self.clients.claim();});self.addEventListener('fetch',e=>{if(e.request.method!=='GET')return;const u=e.request.url;if(u.includes('api.anthropic.com')||u.includes('openfoodfacts')||u.includes('themealdb')||u.includes('fonts.googleapis')||u.includes('cdnjs')||u.includes('supabase.co'))return;e.respondWith(caches.match(e.request).then(r=>r||fetch(e.request).then(res=>{if(res&&res.ok){const cl=res.clone();caches.open(C).then(c=>c.put(e.request,cl));}return res;})));});`;
+  const sw = `const C='drews-hub-v21';self.addEventListener('install',e=>{e.waitUntil(caches.open(C).then(c=>c.addAll(['.'])));self.skipWaiting();});self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==C).map(k=>caches.delete(k)))));self.clients.claim();});self.addEventListener('fetch',e=>{if(e.request.method!=='GET')return;const u=e.request.url;if(u.includes('api.anthropic.com')||u.includes('openfoodfacts')||u.includes('themealdb')||u.includes('fonts.googleapis')||u.includes('cdnjs')||u.includes('supabase.co'))return;e.respondWith(caches.match(e.request).then(r=>r||fetch(e.request).then(res=>{if(res&&res.ok){const cl=res.clone();caches.open(C).then(c=>c.put(e.request,cl));}return res;})));});`;
   try { navigator.serviceWorker.register(URL.createObjectURL(new Blob([sw], { type: 'application/javascript' }))).catch(() => {}); } catch {}
 }
 
