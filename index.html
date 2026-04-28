@@ -17,8 +17,28 @@
 <div id="root"></div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/gun/gun.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
 <script type="text/babel">
+/* ── GUN P2P — zero setup, real-time sync via public relay ── */
+let gun = null;
+try { gun = new Gun(['https://gun-manhattan.herokuapp.com/gun','https://peer.wallie.io/gun']); } catch(e) {}
+const GUN_NS = 'drews-fitness-hub-v1';
+
+/* ── SUPABASE ── */
+const SUPABASE_URL_DEFAULT = 'https://ozykfznehwmhzwdoumuc.supabase.co';
+const SUPABASE_KEY_DEFAULT = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im96eWtmem5laHdtaHp3ZG91bXVjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzczNDYzNjQsImV4cCI6MjA5MjkyMjM2NH0.CARRVqI_vK5LzRtg6JzDwQHkWkOWC2UavP_ChIwWeAk';
+let _sb = null;  // Supabase client — named _sb to avoid clobbering window.supabase (Babel global scope)
+function initSupabase(url, key) {
+  try {
+    const u = url || localStorage.getItem('supabaseUrl') || SUPABASE_URL_DEFAULT;
+    const k = key || localStorage.getItem('supabaseKey') || SUPABASE_KEY_DEFAULT;
+    if (u && k && window.supabase) _sb = window.supabase.createClient(u, k);
+  } catch(e) { console.warn('Supabase init failed', e); }
+}
+initSupabase();
+
 const { useState, useEffect, useRef, useCallback } = React;
 
 /* ── CONSTANTS ── */
@@ -34,6 +54,56 @@ const GOAL_PRESETS = {
   cut:      { label:"Cut",      emoji:"🔥",  cal:1900, protein:210, carbs:160, fat:55,  desc:"Lose fat, preserve muscle" },
   strength: { label:"Strength", emoji:"🏋️", cal:2600, protein:210, carbs:260, fat:70,  desc:"Maximize strength gains" },
 };
+
+/* ── DYNAMIC CALORIE ENGINE (Mifflin-St Jeor) ── */
+const ACTIVITY_FACTORS = {
+  sedentary: 1.2,    // desk job, little/no exercise
+  light:     1.375,  // light exercise 1–3 days/wk
+  moderate:  1.55,   // moderate exercise 3–5 days/wk
+  active:    1.725,  // hard exercise 6–7 days/wk
+  very:      1.9,    // very hard exercise + physical job
+};
+const GOAL_ADJUSTMENTS = { cut: -500, recomp: 0, bulk: 300, strength: 200 };
+const PROTEIN_PER_LB   = { cut: 1.0, recomp: 0.9, bulk: 0.8, strength: 0.9 };
+
+function parseHeightToCm(h) {
+  if (!h) return null;
+  // handles formats: 5'11", 5'11, 5 11, 511, 71 (total inches), 180cm
+  const cmMatch = String(h).match(/(\d+\.?\d*)\s*cm/i);
+  if (cmMatch) return parseFloat(cmMatch[1]);
+  const ftIn = String(h).match(/^(\d+)['''′\s](\d+)/);
+  if (ftIn) return parseInt(ftIn[1]) * 30.48 + parseInt(ftIn[2]) * 2.54;
+  const ftOnly = String(h).match(/^(\d+)['''′]?$/);
+  if (ftOnly) {
+    const n = parseInt(ftOnly[1]);
+    // if > 8 treat as total inches, otherwise feet
+    return n > 8 ? n * 2.54 : n * 30.48;
+  }
+  return null;
+}
+
+function computeDynamicGoal(sex, age, weightLbs, heightText, activity, goalKey) {
+  const kg = parseFloat(weightLbs) / 2.2046;
+  const cm = parseHeightToCm(heightText);
+  const a  = parseFloat(age);
+  const af = ACTIVITY_FACTORS[activity] || ACTIVITY_FACTORS.moderate;
+  if (!kg || !cm || !a || kg < 30 || cm < 100 || a < 10) return null;
+  // Mifflin-St Jeor BMR
+  const bmr = sex === 'female'
+    ? (10 * kg) + (6.25 * cm) - (5 * a) - 161
+    : (10 * kg) + (6.25 * cm) - (5 * a) + 5;
+  const tdee  = Math.round(bmr * af);
+  const adj   = GOAL_ADJUSTMENTS[goalKey] || 0;
+  const cal   = Math.max(1200, Math.round(tdee + adj));
+  const wLbs  = parseFloat(weightLbs);
+  const pRate = PROTEIN_PER_LB[goalKey] || 0.9;
+  const protein    = Math.round(wLbs * pRate);
+  const proteinCal = protein * 4;
+  const remaining  = cal - proteinCal;
+  const carbs = Math.max(50,  Math.round((remaining * 0.55) / 4));
+  const fat   = Math.max(20,  Math.round((remaining * 0.45) / 9));
+  return { cal, protein, carbs, fat, dynamic: true, bmr: Math.round(bmr), tdee };
+}
 
 /* ── INGREDIENT COST LOOKUP ($/lb unless noted) ── */
 const INGREDIENT_COSTS = {
@@ -136,6 +206,20 @@ const BADGES = [
   {id:"budget_week",emoji:"💰",name:"Budget Boss",desc:"Stayed under weekly budget"},
 ];
 
+/* ── XP / LEVEL SYSTEM ── */
+const XP_LEVELS = [
+  { level:1,  xp:0,     name:'Rookie',    emoji:'🌱' },
+  { level:2,  xp:200,   name:'Newcomer',  emoji:'🏃' },
+  { level:3,  xp:500,   name:'Dedicated', emoji:'💪' },
+  { level:4,  xp:1000,  name:'Athlete',   emoji:'🏋️' },
+  { level:5,  xp:2000,  name:'Beast',     emoji:'🦁' },
+  { level:6,  xp:3500,  name:'Elite',     emoji:'⚡' },
+  { level:7,  xp:5500,  name:'Legend',    emoji:'🌟' },
+  { level:8,  xp:8000,  name:'Champion',  emoji:'🏆' },
+  { level:9,  xp:11500, name:'Immortal',  emoji:'🔥' },
+  { level:10, xp:16000, name:'God Mode',  emoji:'👑' },
+];
+
 const SEED_RECIPES = [
   {id:"r1",name:"Ground Turkey Rice Bowl",servings:1,baseServings:1,cal:580,protein:50,carbs:58,fat:12,time:"15 min",tags:["High Protein","Shift OK","Batch Cook"],
     ingredients:[{item:"Lean ground turkey 93/7",qty:6,unit:"oz"},{item:"White rice cooked",qty:1,unit:"cup"},{item:"Frozen mixed veggies",qty:1,unit:"cup"},{item:"Low-sodium soy sauce",qty:1,unit:"tbsp"},{item:"Garlic powder",qty:0.5,unit:"tsp"}],
@@ -164,7 +248,7 @@ const WEEK_DAYS = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
 
 function load(k,fb){try{const v=localStorage.getItem(k);return v?JSON.parse(v):fb;}catch{return fb;}}
 function save(k,v){try{localStorage.setItem(k,JSON.stringify(v));}catch{}}
-function todayStr(){return new Date().toISOString().slice(0,10);}
+function todayStr(){const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
 function getTodayIdx(){return new Date().getDay();}
 function pad(n){return String(n).padStart(2,"0");}
 function fmtTime(s){return `${pad(Math.floor(s/60))}:${pad(s%60)}`;}
@@ -700,14 +784,17 @@ function FitnessHub() {
   const [userAge,      setUserAge]      = useState(() => load('userAge', ''));
   const [userWeight,   setUserWeight]   = useState(() => load('userWeight', ''));
   const [userHeight,   setUserHeight]   = useState(() => load('userHeight', ''));
+  const [userSex,      setUserSex]      = useState(() => load('userSex', 'male'));
+  const [activityLevel,setActivityLevel]= useState(() => load('activityLevel', 'moderate'));
+  const [weightLog,    setWeightLog]    = useState(() => load('weightLog', []));
+  const [customGoalCal,    setCustomGoalCal]    = useState(() => load('customGoalCal', null));
+  const [customGoalProtein,setCustomGoalProtein]= useState(() => load('customGoalProtein', null));
   const [accentColor,  setAccentColor]  = useState(() => load('accentColor', '#4BDE80'));
   const [hubWidgets,   setHubWidgets]   = useState(() => load('hubWidgets', { plan:true, macros:true, log:true, streak:true }));
   const [onboarded,    setOnboarded]    = useState(() => load('onboarded', false));
   /* ── challenges ── */
   const [myChallenges,     setMyChallenges]     = useState(() => load('myChallenges', []));
   const [pendingChallenge, setPendingChallenge] = useState(null);
-  /* ── firebase sync ── */
-  const [firebaseUrl, setFirebaseUrl] = useState(() => load('firebaseUrl', ''));
   const [userId] = useState(() => {
     let id = load('hubUserId', '');
     if (!id) { id = 'u_' + Math.random().toString(36).slice(2, 10); save('hubUserId', id); }
@@ -727,6 +814,14 @@ function FitnessHub() {
   const [recipeSwaps,   setRecipeSwaps]   = useState(null);
   const [toast,        setToast]        = useState(null);
   const [badge,        setBadge]        = useState(null);
+  const [earnedBadges, setEarnedBadges] = useState(() => load('earnedBadges', []));
+  /* ── auth ── */
+  const [currentUser,  setCurrentUser]  = useState(null);
+  const [showAuth,     setShowAuth]     = useState(false);
+  const [authMode,     setAuthMode]     = useState('signin');
+  const [authEmail,    setAuthEmail]    = useState('');
+  const [authPassword, setAuthPassword] = useState('');
+  const [authLoading,  setAuthLoading]  = useState(false);
 
   /* ── food logger ── */
   const [logItem,     setLogItem]     = useState('');
@@ -760,6 +855,60 @@ function FitnessHub() {
   /* ── planner screen ── */
   const [addToDay, setAddToDay] = useState(null);
 
+  /* ── profile screen state (hoisted so hooks never change count) ── */
+  const [pTab,        setPTab]        = useState('profile');
+  const [profileEdit, setProfileEdit] = useState(false);
+  const [pLName,      setPLName]      = useState(() => load('userName', ''));
+  const [pLBio,       setPLBio]       = useState(() => load('userBio', ''));
+  const [pLAge,       setPLAge]       = useState(() => load('userAge', ''));
+  const [pLWeight,    setPLWeight]    = useState(() => load('userWeight', ''));
+  const [pLHeight,    setPLHeight]    = useState(() => load('userHeight', ''));
+  const [pLAvatar,    setPLAvatar]    = useState(() => load('userAvatar', '💪'));
+  const [pLSex,       setPLSex]       = useState(() => load('userSex', 'male'));
+  const [pLActivity,  setPLActivity]  = useState(() => load('activityLevel', 'moderate'));
+  const [showAvatarPicker, setShowAvatarPicker] = useState(false);
+  const [pSKey,       setPSKey]       = useState(() => load('claudeKey', ''));
+  const [pSUrl,       setPSUrl]       = useState(() => load('vercelUrl', ''));
+  const [pSBudget,    setPSBudget]    = useState(() => String(load('weekBudget', 150)));
+  const [pSVault,     setPSVault]     = useState(() => load('vaultName', ''));
+  const [pSSupaUrl,   setPSSupaUrl]   = useState(() => localStorage.getItem('supabaseUrl') || '');
+  const [pSSupaKey,   setPSSupaKey]   = useState(() => localStorage.getItem('supabaseKey') || '');
+  /* ── challenges screen state (hoisted so hooks never change count) ── */
+  const [cView,       setCView]       = useState('list');
+  const [cType,       setCType]       = useState('protein');
+  const [cTitleVal,   setCTitleVal]   = useState('');
+  const [cTargetVal,  setCTargetVal]  = useState('');
+  const [cDaysVal,    setCDaysVal]    = useState('7');
+  const [cFriend,     setCFriend]     = useState('');
+  const [createdLink, setCreatedLink] = useState(null);
+  const [remoteData,  setRemoteData]  = useState({});
+  const [syncing,     setSyncing]     = useState(false);
+  const [lastSync,    setLastSync]    = useState(null);
+
+  /* ── check-in + XP / LEVEL ── */
+  const [checkIns,      setCheckIns]      = useState(() => load('checkIns', []));
+  const [userXP,        setUserXP]        = useState(() => load('userXP', 0));
+  const [showCheckIn,   setShowCheckIn]   = useState(false);
+  const [ciWeight,      setCiWeight]      = useState('');
+  const [ciEnergy,      setCiEnergy]      = useState(7);
+  const [ciHunger,      setCiHunger]      = useState(5);
+  const [ciWorkoutDone, setCiWorkoutDone] = useState(false);
+  const [ciDietScore,   setCiDietScore]   = useState(7);
+  const [ciNotes,       setCiNotes]       = useState('');
+  /* ── weekly review / LEVEL insight cache ── */
+  const [levelInsight,    setLevelInsight]    = useState(() => load('levelInsight', null));
+  const [insightLoading,  setInsightLoading]  = useState(false);
+  /* ── weekly review ── */
+  const [weeklyReview,    setWeeklyReview]    = useState(() => load('weeklyReview', null));
+  const [reviewLoading,   setReviewLoading]   = useState(false);
+  /* ── auto-adjust (dismissed date) ── */
+  const [adjustDismissed, setAdjustDismissed] = useState(() => load('adjustDismissed', null));
+  /* ── pantry tracking ── */
+  const [pantry,      setPantry]      = useState(() => load('pantry', []));
+  const [pantryInput, setPantryInput] = useState('');
+  /* ── strength chart ── */
+  const [selectedExercise, setSelectedExercise] = useState('');
+
   /* ── settings modal staging (synced from real state when modal opens) ── */
   const [sKey,       setSKey]       = useState('');
   const [sUrl,       setSUrl]       = useState('');
@@ -789,11 +938,79 @@ function FitnessHub() {
   useEffect(() => save('hubWidgets',   hubWidgets),   [hubWidgets]);
   useEffect(() => save('onboarded',    onboarded),    [onboarded]);
   useEffect(() => save('myChallenges', myChallenges), [myChallenges]);
-  useEffect(() => save('firebaseUrl',  firebaseUrl),  [firebaseUrl]);
+  useEffect(() => save('userSex',         userSex),         [userSex]);
+  useEffect(() => save('activityLevel',   activityLevel),   [activityLevel]);
+  useEffect(() => save('weightLog',       weightLog),       [weightLog]);
+  useEffect(() => save('customGoalCal',   customGoalCal),   [customGoalCal]);
+  useEffect(() => save('customGoalProtein', customGoalProtein), [customGoalProtein]);
+  useEffect(() => save('earnedBadges',     earnedBadges),     [earnedBadges]);
+  useEffect(() => save('checkIns',         checkIns),         [checkIns]);
+  useEffect(() => save('userXP',           userXP),           [userXP]);
+  useEffect(() => save('levelInsight',     levelInsight),     [levelInsight]);
+  useEffect(() => save('weeklyReview',     weeklyReview),     [weeklyReview]);
+  useEffect(() => save('adjustDismissed',  adjustDismissed),  [adjustDismissed]);
+  useEffect(() => save('pantry',           pantry),           [pantry]);
   /* sync settings staging state whenever the modal opens */
   useEffect(() => {
     if (showSettings) { setSKey(apiKey); setSUrl(vercelUrl); setSBudget(String(weekBudget)); setSVaultName(vaultName); }
   }, [showSettings]);
+  /* Auto-prompt daily check-in once per day after 6 AM */
+  useEffect(() => {
+    if (!onboarded) return;
+    if (new Date().getHours() < 6) return;
+    const alreadyDone = checkIns.some(c => c.date === todayStr());
+    if (!alreadyDone) {
+      const t = setTimeout(() => setShowCheckIn(true), 2500);
+      return () => clearTimeout(t);
+    }
+  }, [onboarded]);
+
+  /* sync profile staging state when navigating to profile screen */
+  useEffect(() => {
+    if (screen === 'profile') {
+      setPLName(userName); setPLBio(userBio); setPLAge(userAge);
+      setPLWeight(userWeight); setPLHeight(userHeight); setPLAvatar(userAvatar);
+      setPLSex(userSex); setPLActivity(activityLevel);
+      setPSKey(apiKey); setPSUrl(vercelUrl); setPSBudget(String(weekBudget)); setPSVault(vaultName);
+      setProfileEdit(false);
+    }
+  }, [screen]);
+  /* Gun P2P real-time polling for challenge leaderboards */
+  useEffect(() => {
+    if (!gun || !myChallenges.length) return;
+    let live = true;
+    function pollOnce() {
+      if (!live) return;
+      setSyncing(true);
+      let pending = myChallenges.length;
+      const updates = {};
+      myChallenges.forEach(c => {
+        gun.get(GUN_NS).get('challenges').get(c.id).get('participants').once(raw => {
+          if (raw && typeof raw === 'object') {
+            const parts = {};
+            Object.keys(raw).forEach(pid => {
+              const d = raw[pid];
+              if (!d || pid === '_' || typeof d !== 'object') return;
+              let days = {};
+              try { days = d.days ? JSON.parse(d.days) : {}; } catch {}
+              parts[pid] = { name: d.name||'Friend', avatar: d.avatar||'💪', updatedAt: d.updatedAt||0, days };
+            });
+            updates[c.id] = parts;
+          }
+          pending--;
+          if (pending <= 0 && live) {
+            setRemoteData(p => ({ ...p, ...updates }));
+            setLastSync(new Date());
+            setSyncing(false);
+          }
+        });
+        setTimeout(() => { if (live && pending > 0) { pending = 0; setSyncing(false); } }, 4000);
+      });
+    }
+    pollOnce();
+    const t = setInterval(pollOnce, 15000);
+    return () => { live = false; clearInterval(t); };
+  }, [myChallenges.length]);
 
   /* ── cross-device sync via URL hash ── */
   useEffect(() => {
@@ -814,15 +1031,27 @@ function FitnessHub() {
       const val = hash.slice(6);
       window.history.replaceState(null, '', window.location.pathname);
       if (val.startsWith('ch_')) {
-        // New format: fetch metadata from Firebase
-        fbGet(`/challenges/${val}/meta`).then(meta => {
-          if (meta) setPendingChallenge(meta);
-        });
+        // Fetch metadata from Gun P2P network (zero setup)
+        gunGetMeta(val, meta => { if (meta) setPendingChallenge(meta); });
       } else {
-        // Old base64 fallback
+        // Legacy base64 fallback
         try { setPendingChallenge(JSON.parse(atob(val))); } catch {}
       }
     }
+  }, []);
+
+  /* ── Supabase auth state listener ── */
+  useEffect(() => {
+    if (!_sb) return;
+    _sb.auth.getSession().then(({ data: { session } }) => {
+      if (session?.user) setCurrentUser(session.user);
+    });
+    const { data: { subscription } } = _sb.auth.onAuthStateChange((event, session) => {
+      setCurrentUser(session ? session.user : null);
+      if (event === 'SIGNED_IN' && session) syncProfileToSupabase(session.user);
+      if (event === 'SIGNED_OUT') showToast('Signed out', 'success');
+    });
+    return () => subscription?.unsubscribe();
   }, []);
 
   function generateSyncLink() {
@@ -839,24 +1068,41 @@ function FitnessHub() {
   }
 
   /* ════════════════════════════════════════
-     FIREBASE REALTIME DATABASE HELPERS
+     GUN P2P REAL-TIME HELPERS (zero setup)
   ════════════════════════════════════════ */
-  function fbBase() { return (firebaseUrl || '').replace(/\/+$/, ''); }
-  async function fbGet(path) {
-    if (!firebaseUrl) return null;
-    try { const r = await fetch(`${fbBase()}${path}.json`); return r.ok ? await r.json() : null; } catch { return null; }
+  function gunPutMeta(challenge) {
+    if (!gun) return;
+    gun.get(GUN_NS).get('challenges').get(challenge.id).get('meta').put({
+      id: challenge.id, type: challenge.type, title: challenge.title,
+      emoji: challenge.emoji, target: challenge.target,
+      durationDays: challenge.durationDays, startDate: challenge.startDate,
+      createdBy: challenge.createdBy || userName, createdAt: challenge.createdAt,
+    });
   }
-  async function fbPut(path, data) {
-    if (!firebaseUrl) return;
-    try { await fetch(`${fbBase()}${path}.json`, { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data) }); } catch {}
+  function gunGetMeta(challengeId, cb) {
+    if (!gun) { cb(null); return; }
+    let done = false;
+    gun.get(GUN_NS).get('challenges').get(challengeId).get('meta').once(data => {
+      if (done) return; done = true;
+      cb(data && data.id ? data : null);
+    });
+    setTimeout(() => { if (!done) { done = true; cb(null); } }, 5000);
   }
-  async function fbPatch(path, data) {
-    if (!firebaseUrl) return;
-    try { await fetch(`${fbBase()}${path}.json`, { method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data) }); } catch {}
-  }
-  async function fbDelete(path) {
-    if (!firebaseUrl) return;
-    try { await fetch(`${fbBase()}${path}.json`, { method:'DELETE' }); } catch {}
+  function gunSyncProgress(challenge) {
+    if (!gun) return;
+    const start = new Date(challenge.startDate + 'T00:00:00');
+    const now = new Date();
+    const days = {};
+    for (let i = 0; i < challenge.durationDays; i++) {
+      const d = new Date(start); d.setDate(start.getDate() + i);
+      if (d > now) break;
+      const ds = d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+      days[ds] = computeDayStatus(challenge, ds);
+    }
+    gun.get(GUN_NS).get('challenges').get(challenge.id).get('participants').get(userId).put({
+      name: userName || 'You', avatar: userAvatar || '💪',
+      updatedAt: Date.now(), days: JSON.stringify(days),
+    });
   }
 
   /* compute a single day's challenge status from local data */
@@ -891,31 +1137,18 @@ function FitnessHub() {
     return 'miss';
   }
 
-  /* push ALL past days for one challenge to Firebase */
-  async function syncChallengeToFirebase(challenge) {
-    if (!firebaseUrl) return;
-    const start = new Date(challenge.startDate + 'T00:00:00');
-    const now = new Date();
-    const days = {};
-    for (let i = 0; i < challenge.durationDays; i++) {
-      const d = new Date(start); d.setDate(start.getDate() + i);
-      if (d > now) break;
-      const ds = d.toISOString().split('T')[0];
-      days[ds] = computeDayStatus(challenge, ds);
-    }
-    await fbPatch(`/challenges/${challenge.id}/participants/${userId}`, {
-      name: userName || 'You', avatar: userAvatar || '💪', updatedAt: Date.now(), days
-    });
-  }
-
-  /* auto-push whenever logged data changes */
+  /* auto-push progress to Gun whenever local data changes */
   useEffect(() => {
-    if (!firebaseUrl || !myChallenges.length) return;
-    myChallenges.forEach(c => syncChallengeToFirebase(c));
-  }, [entries, vault, grocLog, myChallenges.length, firebaseUrl]);
+    if (!myChallenges.length) return;
+    myChallenges.forEach(c => gunSyncProgress(c));
+  }, [entries, vault, grocLog, myChallenges.length]);
 
-  /* ── computed macros ── */
-  const goal      = GOAL_PRESETS[userGoal] || GOAL_PRESETS.recomp;
+  /* ── computed macros — dynamic Mifflin-St Jeor or static preset fallback ── */
+  const _dynGoal  = computeDynamicGoal(userSex, userAge, userWeight, userHeight, activityLevel, userGoal);
+  const _baseGoal = GOAL_PRESETS[userGoal] || GOAL_PRESETS.recomp;
+  const goal      = customGoalCal && customGoalProtein
+    ? { ..._baseGoal, cal: customGoalCal, protein: customGoalProtein, dynamic: false }
+    : (_dynGoal || _baseGoal);
   const todayCal  = entries.reduce((s, e) => s + (e.cal     || 0), 0);
   const todayPro  = entries.reduce((s, e) => s + (e.protein || 0), 0);
   const todayCarb = entries.reduce((s, e) => s + (e.carbs   || 0), 0);
@@ -936,23 +1169,367 @@ function FitnessHub() {
     setTimeout(() => setToast(null), 3000);
   }
 
-  async function callClaude(messages, maxTokens = 600, model = 'claude-haiku-4-5-20251001') {
-    if (!apiKey) { showToast('Add API key in Settings ⚙️', 'error'); return null; }
-    try {
-      const r = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': apiKey,
-          'anthropic-version': '2023-06-01',
-          'anthropic-dangerous-direct-browser-access': 'true'
-        },
-        body: JSON.stringify({ model, max_tokens: maxTokens, messages })
+  /* ── XP / LEVEL HELPERS ── */
+  function getLevelInfo(xp) {
+    let cur = XP_LEVELS[0], nxt = XP_LEVELS[1];
+    for (let i = XP_LEVELS.length - 1; i >= 0; i--) {
+      if (xp >= XP_LEVELS[i].xp) { cur = XP_LEVELS[i]; nxt = XP_LEVELS[i + 1] || null; break; }
+    }
+    const progress = nxt ? (xp - cur.xp) / (nxt.xp - cur.xp) : 1;
+    return { ...cur, next: nxt, progress, xpToNext: nxt ? nxt.xp - xp : 0 };
+  }
+
+  function addXP(amount) {
+    setUserXP(prev => {
+      const old = prev, next = old + amount;
+      const oldLv = getLevelInfo(old).level, newLv = getLevelInfo(next).level;
+      if (newLv > oldLv) {
+        const info = getLevelInfo(next);
+        setTimeout(() => showToast(`🎉 LEVEL UP! ${info.emoji} ${info.name} (Lv.${info.level})`, 'success'), 300);
+      }
+      return next;
+    });
+  }
+
+  function getTodayCheckIn() { return checkIns.find(c => c.date === todayStr()) || null; }
+
+  function saveDailyCheckIn() {
+    if (getTodayCheckIn()) { showToast('Already checked in today ✓', 'success'); setShowCheckIn(false); return; }
+    const entry = {
+      date: todayStr(), ts: Date.now(),
+      weight: ciWeight ? parseFloat(ciWeight) : null,
+      energy: ciEnergy, hunger: ciHunger,
+      workoutDone: ciWorkoutDone, dietScore: ciDietScore,
+      notes: ciNotes.trim()
+    };
+    if (entry.weight && entry.weight > 40) {
+      const w = entry.weight;
+      setWeightLog(prev => {
+        const filtered = prev.filter(x => x.date !== todayStr());
+        return [...filtered, { date: todayStr(), weight: w }].sort((a,b) => a.date.localeCompare(b.date));
       });
+      setUserWeight(String(w));
+    }
+    setCheckIns(prev => [...prev, entry]);
+    addXP(10);
+    showToast('✓ Check-in saved! +10 XP', 'success');
+    setShowCheckIn(false);
+    setCiWeight(''); setCiEnergy(7); setCiHunger(5); setCiWorkoutDone(false); setCiDietScore(7); setCiNotes('');
+  }
+
+  /* ── WEIGHT TREND ANALYSIS ── */
+  function getWeightTrend(days = 14) {
+    if (weightLog.length < 2) return null;
+    const recent = weightLog.slice(-days);
+    if (recent.length < 2) return null;
+    const first = recent[0].weight, last = recent[recent.length - 1].weight;
+    const delta = last - first;
+    const weeklyRate = (delta / recent.length) * 7;
+    return { delta: Math.round(delta * 10) / 10, weeklyRate: Math.round(weeklyRate * 10) / 10, current: last, days: recent.length };
+  }
+
+  /* ── LEVEL INTELLIGENCE — AI insight from check-in data ── */
+  async function generateLevelInsight() {
+    if (insightLoading) return;
+    const recent = checkIns.slice(-7);
+    if (recent.length < 2) { showToast('Need at least 2 check-ins for LEVEL insights', 'error'); return; }
+    setInsightLoading(true);
+    const ciSummary = recent.map(c =>
+      `${c.date}: energy=${c.energy}/10, hunger=${c.hunger}/10, workout=${c.workoutDone?'yes':'no'}, diet=${c.dietScore}/10${c.weight ? `, weight=${c.weight}lbs` : ''}`
+    ).join('\n');
+    const trend = getWeightTrend();
+    const trendStr = trend ? `Weight trend: ${trend.delta > 0 ? '+' : ''}${trend.delta}lbs over ${trend.days} days (${trend.weeklyRate > 0 ? '+' : ''}${trend.weeklyRate}lbs/wk)` : 'No weight data';
+    const prompt = `You are LEVEL, an adaptive AI fitness coach. Analyze this user's recent check-in data:\n\n${ciSummary}\n\n${trendStr}\nGoal: ${goal.label} (${goal.desc})\n\nGive 3 specific, actionable insights:\n1. What pattern do you see?\n2. What to adjust this week?\n3. One specific win to focus on\n\nBe direct, data-driven, and motivating. Under 150 words total.`;
+    const text = await callClaude([{ role: 'user', content: prompt }], 250, 'claude-haiku-4-5');
+    setInsightLoading(false);
+    if (text) {
+      setLevelInsight({ text, date: todayStr(), ts: Date.now() });
+      showToast('LEVEL analysis ready! ✓', 'success');
+    }
+  }
+
+  /* ── WEEK HELPERS ── */
+  function getWeekStart(offsetWeeks = 0) {
+    const d = new Date(); d.setDate(d.getDate() - d.getDay() - offsetWeeks * 7);
+    return d.toISOString().split('T')[0];
+  }
+
+  function getWeekDays(weekStartDate) {
+    return Array.from({ length: 7 }, (_, i) => {
+      const d = new Date(weekStartDate); d.setDate(d.getDate() + i);
+      return d.toISOString().split('T')[0];
+    });
+  }
+
+  function getWeekData(weekStartDate) {
+    const days = getWeekDays(weekStartDate || getWeekStart());
+    const weekCIs = checkIns.filter(c => days.includes(c.date));
+    const calByDay = days.map(d => load('entries_' + d, []).reduce((s, e) => s + (e.cal || 0), 0));
+    const proByDay = days.map(d => load('entries_' + d, []).reduce((s, e) => s + (e.protein || 0), 0));
+    const loggedDays = calByDay.filter(c => c > 0).length;
+    const workoutsInWeek = vault.filter(w => days.some(d => (w.date || '').startsWith(d))).length;
+    const weekWeights = weightLog.filter(w => days.includes(w.date));
+    const weightDelta = weekWeights.length >= 2
+      ? Math.round((weekWeights[weekWeights.length-1].weight - weekWeights[0].weight) * 10) / 10 : null;
+    const avgCal  = loggedDays > 0 ? Math.round(calByDay.reduce((a,b)=>a+b,0) / loggedDays) : 0;
+    const avgPro  = loggedDays > 0 ? Math.round(proByDay.reduce((a,b)=>a+b,0) / loggedDays) : 0;
+    const avgEnergy = weekCIs.length > 0 ? (weekCIs.reduce((s,c)=>s+c.energy,0)/weekCIs.length).toFixed(1) : null;
+    const avgDiet   = weekCIs.length > 0 ? (weekCIs.reduce((s,c)=>s+c.dietScore,0)/weekCIs.length).toFixed(1) : null;
+    return { days, loggedDays, workoutsInWeek, avgCal, avgPro, weightDelta, avgEnergy, avgDiet, checkInsLogged: weekCIs.length };
+  }
+
+  /* ── AUTO-ADJUST SYSTEM (pure logic, no AI) ── */
+  function computeAutoAdjust() {
+    if (adjustDismissed === todayStr()) return null;
+    const trend = getWeightTrend(14);
+    const recentCIs = checkIns.slice(-7);
+    if (recentCIs.length < 3 && !trend) return null;
+    const workoutRate = recentCIs.length > 0 ? recentCIs.filter(c => c.workoutDone).length / recentCIs.length : null;
+    const avgDiet     = recentCIs.length > 0 ? recentCIs.reduce((s,c)=>s+c.dietScore,0) / recentCIs.length : null;
+    // Weight stalled on cut
+    if (userGoal === 'cut' && trend && Math.abs(trend.delta) < 0.5 && trend.days >= 10)
+      return { icon:'⚖️', color:'#FF6B4A', title:'Weight stalled on cut',
+        msg:`No change in ${trend.days} days. Try cutting 150 cal.`,
+        action: () => { setCustomGoalCal((customGoalCal || goal.cal) - 150); showToast('Calories reduced by 150 ✓', 'success'); },
+        actionLabel:'Apply −150 cal' };
+    // Gaining too fast on cut
+    if (userGoal === 'cut' && trend && trend.weeklyRate > 0.5)
+      return { icon:'⬆️', color:'#FF6B4A', title:'Gaining on cut',
+        msg:`+${trend.weeklyRate}lbs/week. Check portions — you may be underlogging.`,
+        actionLabel: null };
+    // Bulk too slow
+    if (userGoal === 'bulk' && trend && trend.weeklyRate < 0.15 && trend.days >= 10)
+      return { icon:'📈', color:accentColor, title:'Bulk too slow',
+        msg:`Only +${trend.weeklyRate}lbs/week. Add 200 cal to hit your surplus.`,
+        action: () => { setCustomGoalCal((customGoalCal || goal.cal) + 200); showToast('Calories increased by 200 ✓', 'success'); },
+        actionLabel:'Apply +200 cal' };
+    // Low workout frequency
+    if (workoutRate !== null && workoutRate < 0.35 && recentCIs.length >= 5)
+      return { icon:'💪', color:'#A855F7', title:'Low training frequency',
+        msg:`${Math.round(workoutRate * 7)} workouts this week. Aim for 3+ to see progress.`,
+        actionLabel: null };
+    // Poor diet consistency
+    if (avgDiet !== null && avgDiet < 4.5 && recentCIs.length >= 5)
+      return { icon:'🥗', color:'#F5C842', title:'Diet consistency is low',
+        msg:`Avg diet score ${avgDiet.toFixed(1)}/10. Try prepping meals on Sunday.`,
+        actionLabel: null };
+    return null;
+  }
+
+  /* ── WEEKLY REVIEW ── */
+  async function generateWeeklyReview() {
+    if (reviewLoading) return;
+    const ws = getWeekStart();
+    if (weeklyReview?.weekStart === ws) { showToast('Already reviewed this week ✓', 'success'); return; }
+    const wd = getWeekData(ws);
+    if (wd.loggedDays < 2 && wd.checkInsLogged < 2) { showToast('Need more data — log food + check in this week first', 'error'); return; }
+    setReviewLoading(true);
+    const trend = getWeightTrend(7);
+    const prompt = `Weekly fitness review. User: ${userName || 'athlete'}, goal: ${goal.label} (${goal.desc}).
+Week of ${ws}:
+- Food logged: ${wd.loggedDays}/7 days | Avg cal: ${wd.avgCal} (target ${goal.cal}) | Avg protein: ${wd.avgPro}g (target ${goal.protein}g)
+- Workouts: ${wd.workoutsInWeek} sessions | Check-ins: ${wd.checkInsLogged}/7
+- Avg energy: ${wd.avgEnergy ?? 'N/A'}/10 | Avg diet adherence: ${wd.avgDiet ?? 'N/A'}/10
+- Weight: ${trend ? `${trend.delta > 0 ? '+' : ''}${trend.delta}lbs this week` : 'no data'}
+
+Write a 4-sentence weekly review: 1) What went well (cite a specific number), 2) Biggest area to improve, 3) One specific action for next week, 4) Motivational close. Under 100 words, direct tone.`;
+    const text = await callClaude([{ role:'user', content:prompt }], 200, 'claude-haiku-4-5');
+    setReviewLoading(false);
+    if (text) {
+      setWeeklyReview({ text, weekStart: ws, stats: wd, ts: Date.now() });
+      addXP(20);
+      showToast('Weekly review ready! +20 XP 📊', 'success');
+    }
+  }
+
+  /* ── STREAK CALENDAR ── */
+  function StreakCalendar() {
+    const WEEKS = 5, DAYS = WEEKS * 7;
+    const cells = Array.from({ length: DAYS }, (_, i) => {
+      const d = new Date(); d.setDate(d.getDate() - (DAYS - 1 - i));
+      const ds = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+      return { ds, hasLog: load('entries_' + ds, []).length > 0, hasCI: checkIns.some(c => c.date === ds), isToday: ds === todayStr() };
+    });
+    let streak = 0;
+    for (let i = DAYS - 1; i >= 0; i--) { if (cells[i].hasLog) streak++; else break; }
+    const bestStreak = (() => {
+      let best = 0, cur = 0;
+      cells.forEach(c => { if (c.hasLog) { cur++; best = Math.max(best, cur); } else cur = 0; });
+      return best;
+    })();
+    return (
+      <div style={{ background:'rgba(255,255,255,0.03)', borderRadius:16, padding:'14px 16px', border:'1px solid rgba(255,255,255,0.06)', marginBottom:16 }}>
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:8 }}>
+          <div style={{ fontSize:10, color:'#4a6a7a', letterSpacing:1 }}>📅 LOG STREAK</div>
+          <div style={{ display:'flex', gap:14 }}>
+            <div style={{ textAlign:'center' }}>
+              <div style={{ fontSize:15, fontWeight:700, color: streak > 0 ? accentColor : '#555', lineHeight:1 }}>{streak}</div>
+              <div style={{ fontSize:8, color:'#444' }}>CURRENT</div>
+            </div>
+            <div style={{ textAlign:'center' }}>
+              <div style={{ fontSize:15, fontWeight:700, color:'#A855F7', lineHeight:1 }}>{bestStreak}</div>
+              <div style={{ fontSize:8, color:'#444' }}>BEST</div>
+            </div>
+          </div>
+        </div>
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(7,1fr)', gap:3, marginBottom:4 }}>
+          {['S','M','T','W','T','F','S'].map((d,i) => (
+            <div key={i} style={{ fontSize:7, color:'#333', textAlign:'center', marginBottom:1 }}>{d}</div>
+          ))}
+          {cells.map((cell, i) => (
+            <div key={i} style={{
+              aspectRatio:'1', borderRadius:3,
+              background: cell.hasLog
+                ? (cell.hasCI ? accentColor : accentColor + '70')
+                : (cell.isToday ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.05)'),
+              border: cell.isToday ? `1px solid ${accentColor}50` : 'none',
+            }} />
+          ))}
+        </div>
+        <div style={{ display:'flex', gap:10, fontSize:9, color:'#444', alignItems:'center', marginTop:6 }}>
+          <span style={{ display:'flex', alignItems:'center', gap:3 }}><span style={{ width:7, height:7, borderRadius:1, background:accentColor, display:'inline-block' }}/> Logged + checked in</span>
+          <span style={{ display:'flex', alignItems:'center', gap:3 }}><span style={{ width:7, height:7, borderRadius:1, background:accentColor+'70', display:'inline-block' }}/> Logged only</span>
+        </div>
+      </div>
+    );
+  }
+
+  /* ── PANTRY FUNCTIONS ── */
+  function addPantryItem() {
+    const item = pantryInput.trim();
+    if (!item) return;
+    setPantry(p => [...p, { id: Date.now(), name: item }]);
+    setPantryInput('');
+  }
+  function removePantryItem(id) {
+    setPantry(p => p.filter(i => i.id !== id));
+  }
+
+  /* ── STRENGTH PROGRESS CHART ── */
+  function StrengthChart() {
+    const allExNames = [];
+    const exSet = new Set();
+    vault.forEach(s => (s.exercises || []).forEach(ex => {
+      if (ex.name && !exSet.has(ex.name)) { exSet.add(ex.name); allExNames.push(ex.name); }
+    }));
+    if (allExNames.length === 0) return (
+      <div style={{ textAlign:'center', padding:'30px 0', color:'#555' }}>
+        <div style={{ fontSize:34, marginBottom:6 }}>🏋️</div>
+        <div style={{ fontSize:12 }}>Complete workouts to see strength charts</div>
+      </div>
+    );
+    const chosen = (selectedExercise && allExNames.includes(selectedExercise)) ? selectedExercise : allExNames[0];
+    const points = vault
+      .filter(s => (s.exercises || []).some(ex => ex.name === chosen))
+      .map(s => {
+        const ex = (s.exercises || []).find(e => e.name === chosen);
+        const maxW = Math.max(0, ...(ex?.sets || []).map(st => parseFloat(st.weight) || 0));
+        const vol  = (ex?.sets || []).reduce((a, st) => a + (parseFloat(st.weight)||0)*(parseInt(st.reps)||0), 0);
+        return { date: (s.date || '').substring(0,10), maxW, vol };
+      })
+      .filter(p => p.maxW > 0)
+      .sort((a, b) => a.date.localeCompare(b.date))
+      .slice(-15);
+    const W = 300, H = 100, pad = 10;
+    const firstPR  = points[0]?.maxW ?? 0;
+    const latestPR = points[points.length-1]?.maxW ?? 0;
+    const delta    = latestPR - firstPR;
+    let chartSvg = null;
+    if (points.length >= 2) {
+      const minW = Math.min(...points.map(p => p.maxW));
+      const maxWv = Math.max(...points.map(p => p.maxW));
+      const range = maxWv - minW || 1;
+      const toX = i => pad + (i / (points.length - 1)) * (W - pad * 2);
+      const toY = v => H - pad - ((v - minW) / range) * (H - pad * 2);
+      const poly = points.map((p, i) => `${toX(i)},${toY(p.maxW)}`).join(' ');
+      const area = `M ${points.map((p,i) => `${toX(i)},${toY(p.maxW)}`).join(' L ')} L ${toX(points.length-1)},${H} L ${toX(0)},${H} Z`;
+      chartSvg = (
+        <svg viewBox={`0 0 ${W} ${H}`} style={{ width:'100%', height:H, display:'block' }}>
+          <defs>
+            <linearGradient id="stg" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor={accentColor} stopOpacity="0.35" />
+              <stop offset="100%" stopColor={accentColor} stopOpacity="0.03" />
+            </linearGradient>
+          </defs>
+          <path d={area} fill="url(#stg)" />
+          <polyline points={poly} fill="none" stroke={accentColor} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+          {points.map((p, i) => (
+            <circle key={i} cx={toX(i)} cy={toY(p.maxW)} r="3" fill={i === points.length-1 ? '#fff' : accentColor} opacity={i === points.length-1 ? 1 : 0.7} />
+          ))}
+          <text x={toX(points.length-1)} y={Math.max(toY(latestPR)-6, pad+8)} textAnchor="middle" fill="#fff" fontSize="10" fontWeight="700">{latestPR}lb</text>
+        </svg>
+      );
+    }
+    return (
+      <div style={{ background:'rgba(255,255,255,0.03)', borderRadius:16, padding:'14px 16px', border:'1px solid rgba(255,255,255,0.06)', marginBottom:14 }}>
+        <div style={{ fontSize:10, color:'#4a6a7a', letterSpacing:1, marginBottom:10 }}>📈 STRENGTH PROGRESS</div>
+        {/* Exercise selector */}
+        <div style={{ display:'flex', flexWrap:'wrap', gap:6, marginBottom:12 }}>
+          {allExNames.slice(0, 10).map(n => (
+            <button key={n} onClick={() => setSelectedExercise(n)}
+              style={{ padding:'4px 10px', borderRadius:20, border:`1px solid ${chosen===n ? accentColor : 'rgba(255,255,255,0.12)'}`,
+                background: chosen===n ? accentColor+'22' : 'transparent',
+                color: chosen===n ? accentColor : '#888', fontSize:11, cursor:'pointer', transition:'all 0.15s' }}>
+              {n}
+            </button>
+          ))}
+          {allExNames.length > 10 && <span style={{ fontSize:11, color:'#555', alignSelf:'center' }}>+{allExNames.length-10} more</span>}
+        </div>
+        {/* Stats row */}
+        {points.length > 0 && (
+          <div style={{ display:'flex', gap:16, marginBottom:10 }}>
+            <div>
+              <div style={{ fontSize:16, fontWeight:700, color:'#fff' }}>{latestPR}<span style={{ fontSize:11, color:'#888' }}>lb</span></div>
+              <div style={{ fontSize:9, color:'#555' }}>MAX WEIGHT</div>
+            </div>
+            <div>
+              <div style={{ fontSize:16, fontWeight:700, color: delta >= 0 ? '#4BDE80' : '#FF6B4A' }}>
+                {delta >= 0 ? '+' : ''}{delta}<span style={{ fontSize:11, color:'#888' }}>lb</span>
+              </div>
+              <div style={{ fontSize:9, color:'#555' }}>PR CHANGE</div>
+            </div>
+            <div>
+              <div style={{ fontSize:16, fontWeight:700, color:'#A855F7' }}>{points.length}</div>
+              <div style={{ fontSize:9, color:'#555' }}>SESSIONS</div>
+            </div>
+          </div>
+        )}
+        {chartSvg || (
+          <div style={{ textAlign:'center', padding:'12px 0', color:'#555', fontSize:12 }}>
+            Need 2+ sessions with {chosen} to show chart
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  /* ── AI ROUTER — Edge Function first, user key fallback ── */
+  async function callClaude(messages, maxTokens = 600, model = 'claude-haiku-4-5-20251001', extra = {}) {
+    const body = { model, max_tokens: maxTokens, messages, ...(extra.tools ? { tools: extra.tools } : {}) };
+    // 1️⃣ Route through Supabase Edge Function (no user key needed)
+    if (_sb) {
+      try {
+        const { data, error } = await _sb.functions.invoke('ai-router', { body });
+        if (error) throw error;
+        // Web-search responses have multi-part content; find text block
+        if (extra.textBlock) return (data?.content || []).find(b => b.type === 'text') || null;
+        return data?.content?.[0]?.text || null;
+      } catch(e) {
+        if (e?.context?.status === 402) { showToast('Daily AI limit reached — upgrade for more 🚀', 'error'); return null; }
+        // Fall through to direct key if edge function unavailable
+      }
+    }
+    // 2️⃣ Fallback: user's own key
+    if (!apiKey) { showToast('AI unavailable — sign in or add API key in Settings ⚙️', 'error'); return null; }
+    try {
+      const headers = { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' };
+      if (extra.beta) headers['anthropic-beta'] = extra.beta;
+      const r = await fetch('https://api.anthropic.com/v1/messages', { method: 'POST', headers, body: JSON.stringify(body) });
       if (!r.ok) { const e = await r.json(); showToast(e.error?.message || 'Claude error', 'error'); return null; }
       const d = await r.json();
+      if (extra.textBlock) return (d?.content || []).find(b => b.type === 'text') || null;
       return d.content?.[0]?.text || null;
-    } catch (e) { showToast('Network error', 'error'); return null; }
+    } catch(e) { showToast('Network error', 'error'); return null; }
   }
 
   async function lookupBarcode(code) {
@@ -995,26 +1572,16 @@ function FitnessHub() {
 
   /* shared nutrition fetch — returns {calories,protein,carbs,fat,serving} or null */
   async function fetchFoodNutrition(foodName) {
-    if (!foodName.trim() || !apiKey) return null;
+    if (!foodName.trim()) return null;
     try {
-      const resp = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json', 'anthropic-dangerous-direct-browser-access': 'true' },
-        body: JSON.stringify({
-          model: 'claude-haiku-4-5',
-          max_tokens: 200,
-          messages: [{ role: 'user', content: `Nutrition facts for: "${foodName}" (1 standard serving). Reply ONLY valid JSON no markdown:\n{"calories":0,"protein":0,"carbs":0,"fat":0,"serving":"size description"}` }]
-        })
-      });
-      const data = await resp.json();
-      const text = data.content?.[0]?.text || '';
+      const text = await callClaude([{ role: 'user', content: `Nutrition facts for: "${foodName}" (1 standard serving). Reply ONLY valid JSON no markdown:\n{"calories":0,"protein":0,"carbs":0,"fat":0,"serving":"size description"}` }], 200, 'claude-haiku-4-5');
+      if (!text) return null;
       return JSON.parse(text.replace(/```json?|```/g, '').trim());
     } catch { return null; }
   }
 
   async function lookupFoodNutrition() {
     if (!logItem.trim()) { showToast('Enter a food name first', 'error'); return; }
-    if (!apiKey) { showToast('Add Claude API key in Settings ⚙️', 'error'); return; }
     setLookingUpFood(true);
     const n = await fetchFoodNutrition(logItem.trim());
     if (n) {
@@ -1048,10 +1615,20 @@ function FitnessHub() {
       cal, protein: pro, carbs: carb, fat,
       time: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
     };
-    setEntries(p => [...p, entry]);
+    setEntries(p => {
+      const next = [...p, entry];
+      // Badge triggers
+      if (p.length === 0) awardBadge('first_log');
+      const totalPro = next.reduce((s, e) => s + (e.protein || 0), 0);
+      if (totalPro >= goal.protein) { awardBadge('protein_goal'); addXP(15); }
+      return next;
+    });
+    addXP(5); // +5 XP for logging food
+    // Check streak after state settles
+    setTimeout(checkStreakBadge, 100);
     setLogItem(''); setLogCal(''); setLogPro(''); setLogCarb(''); setLogFat('');
     setBarcodeData(null);
-    showToast(`Logged ${entry.name}`, 'success');
+    showToast(`Logged ${entry.name} +5 XP`, 'success');
   }
 
   function addRecipeToLog(recipe, servings = 1) {
@@ -1069,12 +1646,48 @@ function FitnessHub() {
     showToast(`Added ${recipe.name} to log`, 'success');
   }
 
+  /* ── Badge system ── */
+  function awardBadge(id) {
+    setEarnedBadges(prev => {
+      if (prev.includes(id)) return prev; // already earned
+      const b = BADGES.find(x => x.id === id);
+      if (!b) return prev;
+      setBadge({ msg: b.name, sub: b.desc, color: '#F5C842', emoji: b.emoji });
+      setTimeout(() => setBadge(null), 4000);
+      return [...prev, id];
+    });
+  }
+
+  function checkStreakBadge() {
+    // check if 3 consecutive days (today + 2 prior) all have at least one entry
+    const days = [0, 1, 2].map(offset => {
+      const d = new Date(); d.setDate(d.getDate() - offset);
+      const ds = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+      return (load('entries_' + ds, [])).length > 0;
+    });
+    if (days.every(Boolean)) { awardBadge('streak3'); addXP(50); }
+  }
+
+  function checkBudgetBadge(newLog) {
+    const weekStart = new Date();
+    weekStart.setDate(weekStart.getDate() - weekStart.getDay());
+    weekStart.setHours(0, 0, 0, 0);
+    const weekTotal = newLog.filter(e => new Date(e.date) >= weekStart).reduce((s, e) => s + e.amount, 0);
+    if (weekTotal > 0 && weekTotal <= weekBudget) awardBadge('budget_week');
+  }
+
   function saveWorkoutSession(session) {
     const full = { ...session, id: Date.now() };
-    setVault(p => { const v = [...p, full]; save('workoutVault', v); return v; });
-    showToast('Workout saved to vault! 🏆', 'success');
-    setBadge({ msg: 'Workout Saved!', sub: `${session.workout} — ${session.exercises?.length || 0} exercises`, color: '#4BDE80' });
-    setTimeout(() => setBadge(null), 4000);
+    setVault(p => {
+      const v = [...p, full];
+      save('workoutVault', v);
+      // Badge triggers
+      if (p.length === 0) awardBadge('first_workout');
+      if (v.length >= 5)  awardBadge('workouts5');
+      return v;
+    });
+    addXP(20); // +20 XP for completing a workout
+    showToast('Workout saved! +20 XP 🏆', 'success');
   }
 
   /* ── Progressive Overload Detector ── */
@@ -1156,26 +1769,17 @@ function FitnessHub() {
   }
 
   async function generateRecipeWithClaude(query) {
-    if (!apiKey) return null;
-    const goal = GOAL_PRESETS[userGoal] || GOAL_PRESETS.recomp;
-    const resp = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json', 'anthropic-dangerous-direct-browser-access': 'true' },
-      body: JSON.stringify({
-        model: 'claude-haiku-4-5',
-        max_tokens: 2000,
-        messages: [{ role: 'user', content: `Fitness chef. 3 distinct high-protein "${query}" recipes for ${goal.label} goal (${goal.protein}g protein, ${goal.cal} cal). Walmart ingredients only. Different protein sources.\n\nJSON array only, no markdown:\n[{"name":"...","ingredients":[{"name":"...","amount":"..."}],"instructions":"1. ...\\n2. ...\\n3. ...\\n4. ...\\n5. ...","calories":0,"protein":0,"carbs":0,"fat":0,"baseServings":2,"prepTime":"X min","cookTime":"X min","macroTip":"..."},...]` }]
-      })
-    });
-    const data = await resp.json();
-    const text = data.content?.[0]?.text || '';
+    const text = await callClaude(
+      [{ role: 'user', content: `Fitness chef. 3 distinct high-protein "${query}" recipes for ${goal.label} goal (${goal.protein}g protein, ${goal.cal} cal). Walmart ingredients only. Different protein sources.\n\nJSON array only, no markdown:\n[{"name":"...","ingredients":[{"name":"...","amount":"..."}],"instructions":"1. ...\\n2. ...\\n3. ...\\n4. ...\\n5. ...","calories":0,"protein":0,"carbs":0,"fat":0,"baseServings":2,"prepTime":"X min","cookTime":"X min","macroTip":"..."},...]` }],
+      2000, 'claude-haiku-4-5'
+    );
+    if (!text) return null;
     try {
-      if (data.type === 'error') throw new Error(data.error?.type === 'rate_limit_error' ? 'rate_limit' : data.error?.message);
       const recipes = JSON.parse(text.replace(/```json?|```/g, '').trim());
       return Array.isArray(recipes)
         ? recipes.map((r, i) => ({ ...r, id: 'ai_' + Date.now() + i, source: 'claude', image: null, category: '🤖 AI Recipe', area: 'Walmart-Ready' }))
         : [{ ...recipes, id: 'ai_' + Date.now(), source: 'claude', image: null, category: '🤖 AI Recipe', area: 'Walmart-Ready' }];
-    } catch(e) { if (e.message === 'rate_limit') throw e; return null; }
+    } catch { return null; }
   }
 
   /* detect fitness intent — these queries need AI, not TheMealDB */
@@ -1208,17 +1812,15 @@ function FitnessHub() {
 
       if (meals.length && !fitnessQuery) {
         setOnlineResults(meals);
-      } else if (apiKey) {
+      } else {
         showToast('🤖 Building recipes… (10-20 sec)', 'info');
         const aiRecipes = await generateRecipeWithClaude(searchQ);
         if (aiRecipes?.length) {
           setOnlineResults(Array.isArray(aiRecipes) ? aiRecipes : [aiRecipes]);
           showToast(`✅ ${Array.isArray(aiRecipes) ? aiRecipes.length : 1} recipes ready!`, 'success');
         } else {
-          showToast('AI returned no results — try again', 'error');
+          setOnlineResults([]);
         }
-      } else {
-        showToast('Add your Claude API key in Settings ⚙️', 'error');
       }
     } catch(e) { showToast('Error: ' + (e.message || 'unknown'), 'error'); }
     setSearching(false);
@@ -1226,30 +1828,14 @@ function FitnessHub() {
 
   /* sub-agent: uses Claude web_search to find real recipes, then builds 3 variations */
   async function buildRecipeFromWebSearch(query) {
-    if (!apiKey) return null;
-    const goal = GOAL_PRESETS[userGoal] || GOAL_PRESETS.recomp;
     try {
-      const resp = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: {
-          'x-api-key': apiKey, 'anthropic-version': '2023-06-01',
-          'content-type': 'application/json', 'anthropic-beta': 'web-search-2025-03-05',
-          'anthropic-dangerous-direct-browser-access': 'true'
-        },
-        body: JSON.stringify({
-          model: 'claude-haiku-4-5',
-          max_tokens: 3000,
-          tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: 2 }],
-          messages: [{ role: 'user', content:
-            `Search the web for "${query}" recipes. Find 3 genuinely different high-protein versions (different ingredients, cooking methods, or flavor profiles). All ingredients must be available at Walmart. Optimize for ${goal.label} goal (~${goal.protein}g protein per serving, ~${goal.cal} cal/day budget).
-
-After searching, reply with ONLY a valid JSON array, no markdown:
-[{"name":"specific name","ingredients":[{"name":"Walmart product name","amount":"exact amount"}],"instructions":"1. Preheat oven to 375°F...\\n2. In a large skillet over medium-high heat...\\n3. Season with...","calories":0,"protein":0,"carbs":0,"fat":0,"baseServings":2,"prepTime":"X min","cookTime":"X min","macroTip":"..."},...]`
-          }]
-        })
-      });
-      const data = await resp.json();
-      const textBlock = (data.content || []).find(b => b.type === 'text');
+      const textBlock = await callClaude(
+        [{ role: 'user', content:
+          `Search the web for "${query}" recipes. Find 3 genuinely different high-protein versions (different ingredients, cooking methods, or flavor profiles). All ingredients must be available at Walmart. Optimize for ${goal.label} goal (~${goal.protein}g protein per serving, ~${goal.cal} cal/day budget).\n\nAfter searching, reply with ONLY a valid JSON array, no markdown:\n[{"name":"specific name","ingredients":[{"name":"Walmart product name","amount":"exact amount"}],"instructions":"1. Preheat oven to 375°F...\\n2. In a large skillet over medium-high heat...\\n3. Season with...","calories":0,"protein":0,"carbs":0,"fat":0,"baseServings":2,"prepTime":"X min","cookTime":"X min","macroTip":"..."},...]`
+        }],
+        3000, 'claude-haiku-4-5',
+        { tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: 2 }], beta: 'web-search-2025-03-05', textBlock: true }
+      );
       if (!textBlock) return null;
       const parsed = JSON.parse(textBlock.text.replace(/```json?|```/g, '').trim());
       const arr = Array.isArray(parsed) ? parsed : [parsed];
@@ -1284,25 +1870,14 @@ After searching, reply with ONLY a valid JSON array, no markdown:
 
   /* protein swap suggestions for a recipe */
   async function getProteinSwaps(recipe) {
-    if (!apiKey) { showToast('Add Claude API key in Settings ⚙️', 'error'); return; }
     setSwappingRecipe(true); setRecipeSwaps(null);
     try {
       const ings = (recipe.ingredients || []).map(i => (typeof i === 'string' ? i : i.name)).join(', ');
-      const resp = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json', 'anthropic-dangerous-direct-browser-access': 'true' },
-        body: JSON.stringify({
-          model: 'claude-haiku-4-5',
-          max_tokens: 600,
-          messages: [{ role: 'user', content:
-            `Recipe: "${recipe.name}"\nIngredients: ${ings}\nCurrent: ~${recipe.calories || '?'} cal, ~${recipe.protein || '?'}g protein.\nSuggest 4 high-protein swaps using Walmart-available products. For walmartProduct use the FULL searchable product name exactly as it appears on Walmart.com (brand + size, e.g. "Great Value Fat-Free Shredded Mozzarella 8oz").\nReply ONLY valid JSON array, no markdown:\n[{"original":"exact ingredient from recipe","swap":"leaner/higher protein version","walmartProduct":"Brand Name Product Size","proteinChange":"+Xg or -Xg","calChange":"+X or -X","tip":"one sentence why"}]`
-          }]
-        })
-      });
-      const data = await resp.json();
-      const text = data.content?.[0]?.text || '';
-      const swaps = JSON.parse(text.replace(/```json?|```/g, '').trim());
-      setRecipeSwaps(swaps);
+      const text = await callClaude([{ role: 'user', content:
+        `Recipe: "${recipe.name}"\nIngredients: ${ings}\nCurrent: ~${recipe.calories || '?'} cal, ~${recipe.protein || '?'}g protein.\nSuggest 4 high-protein swaps using Walmart-available products. For walmartProduct use the FULL searchable product name exactly as it appears on Walmart.com (brand + size, e.g. "Great Value Fat-Free Shredded Mozzarella 8oz").\nReply ONLY valid JSON array, no markdown:\n[{"original":"exact ingredient from recipe","swap":"leaner/higher protein version","walmartProduct":"Brand Name Product Size","proteinChange":"+Xg or -Xg","calChange":"+X or -X","tip":"one sentence why"}]`
+      }], 600, 'claude-haiku-4-5');
+      if (text) setRecipeSwaps(JSON.parse(text.replace(/```json?|```/g, '').trim()));
+      else showToast('Could not get swap suggestions', 'error');
     } catch { showToast('Could not get swap suggestions', 'error'); }
     setSwappingRecipe(false);
   }
@@ -1347,7 +1922,7 @@ After searching, reply with ONLY a valid JSON array, no markdown:
       const recipe = await r.json();
       if (recipe?.name) {
         const full = { ...recipe, id: 'import_' + Date.now(), source: 'import', baseServings: recipe.servings || 2 };
-        setSaved(p => [full, ...p]);
+        setSaved(p => { if (p.length === 0) awardBadge('first_recipe'); return [full, ...p]; });
         setImportUrl('');
         showToast(`Imported: ${recipe.name}`, 'success');
       } else { showToast('Could not extract recipe', 'error'); }
@@ -1396,8 +1971,11 @@ After searching, reply with ONLY a valid JSON array, no markdown:
     const recipeSummary = pool.slice(0, 40).map(r =>
       `• ${r.name}: ${r.calories || 0}cal / ${r.protein || 0}g P / ~$${estimateRecipeCost(r).toFixed(2)}/srv`
     ).join('\n');
+    const pantryLine = pantry.length > 0
+      ? `\n- Already have in pantry: ${pantry.map(p => p.name).join(', ')} — PRIORITIZE recipes using these ingredients`
+      : '';
     await callClaude([{ role: 'user', content:
-      `You are a fitness meal planner. Create a 7-day meal plan for Drew:\n- Goal: ${goal.label} (${goal.cal} cal/day, ${goal.protein}g protein/day)\n- Budget: $${weekBudget}/week (~$${dayBudget}/day)\n- Night shift worker (12hr shifts), high protein priority\n\nAvailable recipes:\n${recipeSummary}\n\nRules:\n1. Stay UNDER $${dayBudget}/day\n2. Hit ${goal.protein}g protein and ~${goal.cal} calories each day\n3. Use ONLY recipes from the list above\n4. 3 meals + 1-2 snacks per day\n\nFormat each day exactly as:\nDay 1 (~$XX.XX): Breakfast: [name], Lunch: [name], Dinner: [name], Snack: [name]\n...`
+      `You are a fitness meal planner. Create a 7-day meal plan for Drew:\n- Goal: ${goal.label} (${goal.cal} cal/day, ${goal.protein}g protein/day)\n- Budget: $${weekBudget}/week (~$${dayBudget}/day)\n- Night shift worker (12hr shifts), high protein priority${pantryLine}\n\nAvailable recipes:\n${recipeSummary}\n\nRules:\n1. Stay UNDER $${dayBudget}/day\n2. Hit ${goal.protein}g protein and ~${goal.cal} calories each day\n3. Use ONLY recipes from the list above\n4. 3 meals + 1-2 snacks per day\n${pantry.length > 0 ? '5. Strongly prefer recipes that use pantry items already owned\n' : ''}\nFormat each day exactly as:\nDay 1 (~$XX.XX): Breakfast: [name], Lunch: [name], Dinner: [name], Snack: [name]\n...`
     }], 800);
     showToast('Plan generated — tap + on any day to add those recipes!', 'success');
     setGenLoading(false);
@@ -1471,7 +2049,11 @@ After searching, reply with ONLY a valid JSON array, no markdown:
   }
 
   function addGrocerySpend(amount, note) {
-    setGrocLog(p => [...p, { id: Date.now(), date: todayStr(), amount: parseFloat(amount) || 0, note }]);
+    setGrocLog(p => {
+      const next = [...p, { id: Date.now(), date: todayStr(), amount: parseFloat(amount) || 0, note }];
+      checkBudgetBadge(next);
+      return next;
+    });
   }
 
   /* ── Obsidian Export ── */
@@ -1643,6 +2225,46 @@ After searching, reply with ONLY a valid JSON array, no markdown:
           </div>
         )}
 
+        {/* ── LEVEL STATUS / CHECK-IN PROMPT ── */}
+        {(() => {
+          const lv = getLevelInfo(userXP);
+          const hasCi = checkIns.some(c => c.date === todayStr());
+          return (
+            <div style={{ background:'rgba(255,255,255,0.03)', borderRadius:16, padding:'12px 16px', border:`1px solid ${hasCi ? accentColor+'30' : 'rgba(255,165,0,0.3)'}`, marginBottom:14, display:'flex', justifyContent:'space-between', alignItems:'center', cursor: hasCi ? 'default' : 'pointer' }}
+              onClick={() => !hasCi && setShowCheckIn(true)}>
+              <div style={{ display:'flex', alignItems:'center', gap:10 }}>
+                <div style={{ fontSize:22 }}>{lv.emoji}</div>
+                <div>
+                  <div style={{ fontSize:12, fontWeight:700, color:'#fff' }}>{lv.name} · Lv.{lv.level}</div>
+                  <div style={{ fontSize:10, color:'#555' }}>{userXP.toLocaleString()} XP</div>
+                </div>
+              </div>
+              {hasCi
+                ? <div style={{ fontSize:10, color:accentColor, fontWeight:700 }}>✓ CHECKED IN</div>
+                : <div style={{ fontSize:11, color:'#F5C842', fontWeight:700 }}>📋 CHECK IN +10 XP</div>
+              }
+            </div>
+          );
+        })()}
+
+        {/* ── BEHAVIOR NUDGE ── */}
+        {(() => {
+          const adj = computeAutoAdjust();
+          if (!adj) return null;
+          return (
+            <div style={{ borderRadius:14, padding:'11px 14px', border:`1px solid ${adj.color}35`, background:`${adj.color}0a`, marginBottom:14, display:'flex', justifyContent:'space-between', alignItems:'center', cursor:'pointer' }}
+              onClick={() => setScreen('profile')}>
+              <div style={{ display:'flex', gap:10, alignItems:'center' }}>
+                <span style={{ fontSize:18 }}>{adj.icon}</span>
+                <div>
+                  <div style={{ fontSize:11, fontWeight:700, color:adj.color }}>{adj.title}</div>
+                  <div style={{ fontSize:10, color:'#555' }}>Tap to view in Goals →</div>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+
         {/* ── CHALLENGES CARD ── */}
         <button onClick={() => setScreen('challenges')} style={{ width:'100%', padding:0, border:'none', background:'transparent', cursor:'pointer', marginBottom:14, textAlign:'left' }}>
           <div style={{ background:`linear-gradient(120deg,${accentColor}18 0%,rgba(168,85,247,0.12) 100%)`, borderRadius:18, padding:'14px 16px', border:`1px solid ${accentColor}30`, display:'flex', alignItems:'center', gap:14 }}>
@@ -1756,6 +2378,7 @@ After searching, reply with ONLY a valid JSON array, no markdown:
 
         {trainTab === 'history' && (
           <div style={{ flex: 1, overflowY: 'auto', padding: '14px 16px' }}>
+            {StrengthChart()}
             {vault.length === 0 ? (
               <div style={{ textAlign: 'center', padding: '60px 0', color: '#444' }}>
                 <div style={{ fontSize: 40, marginBottom: 8 }}>📋</div>
@@ -1899,7 +2522,7 @@ After searching, reply with ONLY a valid JSON array, no markdown:
                 + LOG IT
               </button>
               {!saved.find(s => s.id === activeRecipe.id) && (
-                <button onClick={() => { setSaved(p => [activeRecipe, ...p]); showToast('Saved to cookbook', 'success'); }} style={{ flex: 1, padding: 13, borderRadius: 13, border: '1px solid rgba(74,158,255,0.4)', background: 'rgba(74,158,255,0.1)', color: '#4A9EFF', fontFamily: "'Oswald',sans-serif", fontSize: 14, fontWeight: 700, cursor: 'pointer' }}>
+                <button onClick={() => { setSaved(p => { if (p.length === 0) { awardBadge('first_recipe'); addXP(5); } return [activeRecipe, ...p]; }); showToast('Saved to cookbook +5 XP', 'success'); }} style={{ flex: 1, padding: 13, borderRadius: 13, border: '1px solid rgba(74,158,255,0.4)', background: 'rgba(74,158,255,0.1)', color: '#4A9EFF', fontFamily: "'Oswald',sans-serif", fontSize: 14, fontWeight: 700, cursor: 'pointer' }}>
                   💾 SAVE
                 </button>
               )}
@@ -2087,6 +2710,37 @@ After searching, reply with ONLY a valid JSON array, no markdown:
         </div>
 
         <div style={{ flex: 1, overflowY: 'auto', padding: '10px 16px' }}>
+          {/* ── PANTRY ── */}
+          <div style={{ background:'rgba(255,255,255,0.03)', borderRadius:14, padding:'12px 14px', border:'1px solid rgba(255,255,255,0.07)', marginBottom:12 }}>
+            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:8 }}>
+              <div style={{ fontSize:10, color:'#4a6a7a', letterSpacing:1 }}>🥫 MY PANTRY</div>
+              {pantry.length > 0 && (
+                <div style={{ fontSize:9, color:'#4BDE80' }}>AI will prioritize these ✓</div>
+              )}
+            </div>
+            <div style={{ display:'flex', gap:6, marginBottom: pantry.length > 0 ? 8 : 0 }}>
+              <input
+                value={pantryInput}
+                onChange={e => setPantryInput(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && addPantryItem()}
+                placeholder="eggs, rice, chicken…"
+                style={{ flex:1, background:'rgba(255,255,255,0.05)', border:'1px solid rgba(255,255,255,0.1)', borderRadius:8, padding:'7px 10px', color:'#fff', fontSize:12, outline:'none' }}
+              />
+              <button onClick={addPantryItem} style={{ padding:'7px 12px', borderRadius:8, border:'none', background: accentColor, color:'#000', fontSize:14, fontWeight:700, cursor:'pointer' }}>+</button>
+            </div>
+            {pantry.length > 0 && (
+              <div style={{ display:'flex', flexWrap:'wrap', gap:6 }}>
+                {pantry.map(item => (
+                  <div key={item.id} style={{ display:'flex', alignItems:'center', gap:4, background:'rgba(255,255,255,0.06)', borderRadius:20, padding:'4px 10px', fontSize:11, color:'#ccc' }}>
+                    {item.name}
+                    <button onClick={() => removePantryItem(item.id)} style={{ background:'none', border:'none', color:'#555', cursor:'pointer', fontSize:13, lineHeight:1, padding:0, marginLeft:2 }}>×</button>
+                  </div>
+                ))}
+              </div>
+            )}
+            {pantry.length === 0 && <div style={{ fontSize:11, color:'#444' }}>Add ingredients you already own — AI will build meals around them</div>}
+          </div>
+
           <button onClick={generateMealPlan} disabled={genLoading} style={{ width: '100%', padding: 12, borderRadius: 13, border: '1px solid rgba(74,158,255,0.3)', background: 'rgba(74,158,255,0.1)', color: '#4A9EFF', fontFamily: "'Oswald',sans-serif", fontSize: 14, fontWeight: 700, cursor: 'pointer', marginBottom: 14 }}>
             {genLoading ? '✨ Generating…' : '✨ AI SUGGEST WEEK PLAN'}
           </button>
@@ -2271,20 +2925,10 @@ After searching, reply with ONLY a valid JSON array, no markdown:
      CHALLENGES SCREEN — Firebase real-time
   ══════════════════════════════════════════════ */
   function ChallengesScreen() {
-    const [cView,      setCView]      = useState('list');
-    const [cType,      setCType]      = useState('protein');
-    const [cTitleVal,  setCTitleVal]  = useState('');
-    const [cTargetVal, setCTargetVal] = useState('');
-    const [cDaysVal,   setCDaysVal]   = useState('7');
-    const [cFriend,    setCFriend]    = useState('');
-    const [createdLink,setCreatedLink]= useState(null);
-    const [remoteData, setRemoteData] = useState({}); // { [challengeId]: { [participantId]: {name,avatar,days} } }
-    const [syncing,    setSyncing]    = useState(false);
-    const [lastSync,   setLastSync]   = useState(null);
-
+    /* All state is hoisted to parent — no hooks here */
     const CTYPES = [
-      { id:'protein',  emoji:'💪', label:'Protein',     unit:'g/day',    hint:`${GOAL_PRESETS[userGoal].protein}g`,  defaultT: GOAL_PRESETS[userGoal].protein },
-      { id:'calories', emoji:'🔥', label:'Calories',    unit:'kcal',     hint:`${GOAL_PRESETS[userGoal].cal} kcal`, defaultT: GOAL_PRESETS[userGoal].cal },
+      { id:'protein',  emoji:'💪', label:'Protein',     unit:'g/day',    hint:`${goal.protein}g`,  defaultT: goal.protein },
+      { id:'calories', emoji:'🔥', label:'Calories',    unit:'kcal',     hint:`${goal.cal} kcal`, defaultT: goal.cal },
       { id:'workouts', emoji:'🏋️', label:'Workouts',    unit:'sessions', hint:'Complete X sessions',                 defaultT: 5 },
       { id:'streak',   emoji:'📅', label:'Log Streak',  unit:'days',     hint:'Log food X days straight',           defaultT: 7 },
       { id:'budget',   emoji:'💰', label:'Budget Boss', unit:'$/week',   hint:`$${weekBudget}/wk`,                  defaultT: weekBudget },
@@ -2292,111 +2936,67 @@ After searching, reply with ONLY a valid JSON array, no markdown:
     ];
     const ct = CTYPES.find(t => t.id === cType) || CTYPES[0];
 
-    /* ── fetch all participants for all active challenges ── */
-    async function fetchAll() {
-      if (!firebaseUrl || !myChallenges.length) return;
-      setSyncing(true);
-      const updates = {};
-      for (const c of myChallenges) {
-        const parts = await fbGet(`/challenges/${c.id}/participants`);
-        if (parts) updates[c.id] = parts;
-      }
-      setRemoteData(updates);
-      setLastSync(new Date());
-      setSyncing(false);
-    }
-
-    useEffect(() => {
-      fetchAll();
-      const t = setInterval(fetchAll, 20000); // auto-refresh every 20s
-      return () => clearInterval(t);
-    }, [myChallenges.length, firebaseUrl]);
-
-    /* ── leaderboard for one challenge (merges remote + local) ── */
+    /* ── leaderboard for one challenge (merges Gun remote data + local) ── */
     function getLeaderboard(challenge) {
       const parts = remoteData[challenge.id] || {};
       const start = new Date(challenge.startDate + 'T00:00:00');
-      const entries = Object.entries(parts).map(([pid, pdata]) => {
+      function dateStr(d) { return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+      const board = Object.entries(parts).map(([pid, pdata]) => {
         const isMe = pid === userId;
         const days = [];
         for (let i = 0; i < challenge.durationDays; i++) {
           const d = new Date(start); d.setDate(start.getDate() + i);
-          const ds = d.toISOString().split('T')[0];
+          const ds = dateStr(d);
           const status = isMe ? computeDayStatus(challenge, ds) : ((pdata.days || {})[ds] || (new Date(ds+'T12:00:00') > new Date() ? 'future' : 'miss'));
           days.push({ ds, status });
         }
         const done = days.filter(d => d.status === 'done').length;
         const past = days.filter(d => d.status !== 'future').length;
-        return {
-          pid, isMe,
-          name:   isMe ? (userName || 'You')       : (pdata.name   || 'Friend'),
-          avatar: isMe ? (userAvatar || '💪')       : (pdata.avatar || '💪'),
-          days, done, past,
-          pct: past > 0 ? Math.round(done / Math.max(past,1) * 100) : 0,
-          updatedAt: pdata.updatedAt || 0,
-        };
+        return { pid, isMe, name: isMe ? (userName||'You') : (pdata.name||'Friend'),
+          avatar: isMe ? (userAvatar||'💪') : (pdata.avatar||'💪'),
+          days, done, past, pct: past > 0 ? Math.round(done/Math.max(past,1)*100) : 0, updatedAt: pdata.updatedAt||0 };
       });
-      // If nobody is in Firebase yet, add local "me" row
+      // Always ensure local "me" row is present
       if (!parts[userId]) {
         const myDays = [];
         for (let i = 0; i < challenge.durationDays; i++) {
           const d = new Date(start); d.setDate(start.getDate() + i);
-          const ds = d.toISOString().split('T')[0];
+          const ds = dateStr(d);
           myDays.push({ ds, status: computeDayStatus(challenge, ds) });
         }
         const done = myDays.filter(d => d.status === 'done').length;
         const past = myDays.filter(d => d.status !== 'future').length;
-        entries.unshift({ pid: userId, isMe: true, name: userName || 'You', avatar: userAvatar || '💪', days: myDays, done, past, pct: past > 0 ? Math.round(done/Math.max(past,1)*100) : 0, updatedAt: 0 });
+        board.unshift({ pid: userId, isMe: true, name: userName||'You', avatar: userAvatar||'💪', days: myDays, done, past, pct: past > 0 ? Math.round(done/Math.max(past,1)*100) : 0, updatedAt: 0 });
       }
-      return entries.sort((a,b) => b.pct - a.pct);
+      return board.sort((a,b) => b.pct - a.pct);
     }
 
-    function buildLink(challenge) {
-      return `${location.origin}${location.pathname}#join=${challenge.id}`;
-    }
+    function buildLink(challenge) { return `${location.origin}${location.pathname}#join=${challenge.id}`; }
 
-    async function doCreate() {
+    function doCreate() {
       const typeObj = CTYPES.find(t => t.id === cType);
       const challenge = {
-        id: 'ch_' + Date.now(),
-        type: cType,
+        id: 'ch_' + Date.now(), type: cType,
         title: cTitleVal.trim() || `${typeObj.label} Challenge`,
-        emoji: typeObj.emoji,
-        target: parseFloat(cTargetVal) || typeObj.defaultT || 1,
-        durationDays: parseInt(cDaysVal) || 7,
-        friendName: cFriend.trim(),
-        createdBy: userName,
-        startDate: new Date().toISOString().split('T')[0],
-        createdAt: Date.now(),
-        checkins: [],
-        isOwn: true,
+        emoji: typeObj.emoji, target: parseFloat(cTargetVal) || typeObj.defaultT || 1,
+        durationDays: parseInt(cDaysVal) || 7, friendName: cFriend.trim(),
+        createdBy: userName, startDate: todayStr(), createdAt: Date.now(), checkins: [], isOwn: true,
       };
       setMyChallenges(p => [...p, challenge]);
-      // Push metadata + creator's participant slot to Firebase
-      if (firebaseUrl) {
-        await fbPut(`/challenges/${challenge.id}/meta`, {
-          id: challenge.id, type: challenge.type, title: challenge.title,
-          emoji: challenge.emoji, target: challenge.target,
-          durationDays: challenge.durationDays, startDate: challenge.startDate,
-          createdBy: userName, createdAt: challenge.createdAt,
-        });
-        await syncChallengeToFirebase(challenge);
-      }
-      const link = buildLink(challenge);
-      setCreatedLink(link);
+      gunPutMeta(challenge);   // push metadata to Gun P2P
+      gunSyncProgress(challenge); // push creator's progress
+      setCreatedLink(buildLink(challenge));
       setCView('list');
       showToast('Challenge created! Share the link 🎯', 'success');
     }
 
     function doCheckIn(id) {
-      const today = new Date().toISOString().split('T')[0];
-      setMyChallenges(p => p.map(c => c.id === id ? { ...c, checkins: [...new Set([...(c.checkins||[]), today])] } : c));
+      setMyChallenges(p => p.map(c => c.id === id ? { ...c, checkins: [...new Set([...(c.checkins||[]), todayStr()])] } : c));
       showToast('Checked in! 💪', 'success');
     }
 
-    async function doDelete(id) {
+    function doDelete(id) {
       setMyChallenges(p => p.filter(c => c.id !== id));
-      if (firebaseUrl) await fbDelete(`/challenges/${id}/participants/${userId}`);
       showToast('Challenge removed', 'info');
     }
 
@@ -2404,29 +3004,10 @@ After searching, reply with ONLY a valid JSON array, no markdown:
       const link = buildLink(challenge);
       if (navigator.share) {
         navigator.share({ title: challenge.title, text: `${userName} is challenging you: ${challenge.title} (${challenge.durationDays} days). Accept?`, url: link }).catch(()=>{});
-      } else {
-        navigator.clipboard?.writeText(link).catch(()=>{});
-        showToast('Invite link copied! 📋', 'success');
-      }
+      } else { navigator.clipboard?.writeText(link).catch(()=>{}); showToast('Invite link copied! 📋', 'success'); }
     }
 
     const inp = { width:'100%', padding:'11px 14px', borderRadius:12, border:'1px solid rgba(255,255,255,0.12)', background:'rgba(255,255,255,0.05)', color:'#fff', fontSize:13, fontFamily:'inherit', outline:'none', marginBottom:8 };
-
-    /* ─── NO FIREBASE BANNER ─── */
-    function NoFirebaseBanner() {
-      return (
-        <div style={{ background:'rgba(255,107,74,0.08)', border:'1px solid rgba(255,107,74,0.25)', borderRadius:14, padding:'14px 16px', marginBottom:16 }}>
-          <div style={{ fontSize:12, color:'#FF6B4A', fontWeight:700, marginBottom:6 }}>⚡ Real-time sync not connected</div>
-          <div style={{ fontSize:11, color:'#aaa', lineHeight:1.5, marginBottom:10 }}>
-            To see friends' progress live, add a Firebase Database URL in <span style={{ color:accentColor, fontWeight:700 }}>Profile → App → Firebase URL</span>.{'\n'}
-            Takes 2 minutes — completely free.
-          </div>
-          <button onClick={() => setScreen('profile')} style={{ padding:'7px 14px', borderRadius:9, border:`1px solid ${accentColor}50`, background:`${accentColor}18`, color:accentColor, fontFamily:"'Oswald',sans-serif", fontSize:11, fontWeight:700, cursor:'pointer' }}>
-            GO TO SETTINGS →
-          </button>
-        </div>
-      );
-    }
 
     /* ─── CREATE VIEW ─── */
     if (cView === 'create') return (
@@ -2489,13 +3070,11 @@ After searching, reply with ONLY a valid JSON array, no markdown:
               <div style={{ fontFamily:"'Oswald',sans-serif", fontSize:28, fontWeight:700, color:'#fff', lineHeight:1 }}>CHALLENGES</div>
             </div>
             <div style={{ display:'flex', gap:8, alignItems:'center' }}>
-              {firebaseUrl && (
-                <button onClick={fetchAll} style={{ padding:'7px 10px', borderRadius:10, border:`1px solid ${accentColor}30`, background:'transparent', color:syncing?accentColor:'#3a5a6a', cursor:'pointer', fontSize:13 }}>{syncing ? '⟳' : '↻'}</button>
-              )}
+              <div style={{ fontSize:9, color: syncing ? accentColor : '#3a5a6a', fontWeight:700 }}>{syncing ? '⟳ SYNC' : '📡 P2P'}</div>
               <button onClick={() => { setCView('create'); setCreatedLink(null); setCTitleVal(''); setCFriend(''); setCTargetVal(String(CTYPES[0].defaultT)); setCType('protein'); }} style={{ padding:'10px 16px', borderRadius:14, border:`1px solid ${accentColor}50`, background:`${accentColor}18`, color:accentColor, fontFamily:"'Oswald',sans-serif", fontSize:13, fontWeight:700, cursor:'pointer' }}>+ NEW</button>
             </div>
           </div>
-          {lastSync && firebaseUrl && <div style={{ fontSize:9, color:'#3a5a6a', marginTop:4 }}>Last synced {lastSync.toLocaleTimeString()} · auto-refreshes every 20s</div>}
+          {lastSync && <div style={{ fontSize:9, color:'#3a5a6a', marginTop:4 }}>Synced {lastSync.toLocaleTimeString()} · live P2P sync · no setup needed</div>}
 
           {/* Created link banner */}
           {createdLink && (
@@ -2511,8 +3090,6 @@ After searching, reply with ONLY a valid JSON array, no markdown:
         </div>
 
         <div style={{ flex:1, overflowY:'auto', padding:'12px 20px', paddingBottom:40 }}>
-          {!firebaseUrl && <NoFirebaseBanner />}
-
           {myChallenges.length === 0 ? (
             <div style={{ textAlign:'center', paddingTop:40 }}>
               <div style={{ fontSize:64, marginBottom:14 }}>🏆</div>
@@ -2535,7 +3112,7 @@ After searching, reply with ONLY a valid JSON array, no markdown:
             const endDate = new Date(challenge.startDate); endDate.setDate(endDate.getDate() + challenge.durationDays);
             const isOver  = new Date() > endDate;
             const daysLeft = Math.max(0, Math.ceil((endDate - new Date()) / 86400000));
-            const todayISO = new Date().toISOString().split('T')[0];
+            const todayISO = todayStr();
             const todayDone = me?.days.find(d => d.ds === todayISO)?.status === 'done';
             const showCheckin = challenge.type === 'custom' && !todayDone && !isOver;
             const leader = board[0];
@@ -2619,12 +3196,15 @@ After searching, reply with ONLY a valid JSON array, no markdown:
   ══════════════════════════════════════════════ */
   function OnboardingScreen() {
     const [step, setStep] = useState(0);
-    const [localName, setLocalName] = useState('');
-    const [localAvatar, setLocalAvatar] = useState('💪');
-    const [localGoal, setLocalGoal] = useState('recomp');
-    const [localBudget, setLocalBudget] = useState('150');
+    const [localName,     setLocalName]     = useState('');
+    const [localAvatar,   setLocalAvatar]   = useState('💪');
+    const [localGoal,     setLocalGoal]     = useState('recomp');
+    const [localSex,      setLocalSex]      = useState('male');
+    const [localActivity, setLocalActivity] = useState('moderate');
+    const [localBudget,   setLocalBudget]   = useState('150');
     const avatarOptions = ['💪','🏋️','🔥','⚡','🦾','🥊','🏃','🧠','🎯','🥷','🦅','🌊','🐺','⚔️','🛡️','💎','🌟','🚀'];
-    const steps = ['Who are you?','Pick your avatar','Set your goal','Your budget'];
+    // 6 steps: name, avatar, goal, body stats, activity, budget
+    const steps = ['Who are you?','Pick your avatar','Set your goal','Your body','Activity level','Your budget'];
     const canNext = step === 0 ? localName.trim().length >= 2 : true;
 
     function finish() {
@@ -2632,19 +3212,31 @@ After searching, reply with ONLY a valid JSON array, no markdown:
       setUserName(name);
       setUserAvatar(localAvatar || '💪');
       setUserGoal(localGoal || 'recomp');
+      setUserSex(localSex);
+      setActivityLevel(localActivity);
       setWeekBudget(parseFloat(localBudget) || 150);
-      // persist immediately so the main app reads them on first render
-      save('userName',   name);
-      save('userAvatar', localAvatar || '💪');
-      save('userGoal',   localGoal || 'recomp');
-      save('weekBudget', parseFloat(localBudget) || 150);
-      save('onboarded',  true);
+      save('userName',      name);
+      save('userAvatar',    localAvatar || '💪');
+      save('userGoal',      localGoal || 'recomp');
+      save('userSex',       localSex);
+      save('activityLevel', localActivity);
+      save('weekBudget',    parseFloat(localBudget) || 150);
+      save('onboarded',     true);
       setOnboarded(true);
       setScreen('home');
       setTimeout(() => showToast(`Welcome, ${name}! 🎉`, 'success'), 300);
     }
 
     const accent = '#4BDE80';
+    const stepEmojis = ['👋', localAvatar, GOAL_PRESETS[localGoal].emoji, localSex === 'female' ? '♀️' : '♂️', '🏃', '💰'];
+    const stepSubs   = [
+      'This is your personal fitness hub.',
+      'Choose an avatar that represents you.',
+      "We'll tailor your macros and plans to your goal.",
+      "We'll use this to calculate your exact calorie target.",
+      "More accurate than any preset — we'll calculate your TDEE.",
+      "We'll use this for meal planning & shopping.",
+    ];
     return (
       <div style={{ height: '100%', overflowY: 'auto', background: 'linear-gradient(160deg,#0c1220 0%,#0c0c18 100%)', display: 'flex', flexDirection: 'column', padding: '0 24px' }}>
         {/* Progress dots */}
@@ -2655,14 +3247,9 @@ After searching, reply with ONLY a valid JSON array, no markdown:
         </div>
 
         <div style={{ textAlign: 'center', marginBottom: 36 }}>
-          <div style={{ fontSize: 48, marginBottom: 12 }}>{step === 0 ? '👋' : step === 1 ? localAvatar : step === 2 ? GOAL_PRESETS[localGoal].emoji : '💰'}</div>
+          <div style={{ fontSize: 48, marginBottom: 12 }}>{stepEmojis[step]}</div>
           <div style={{ fontFamily: "'Bebas Neue',sans-serif", fontSize: 32, color: '#fff', letterSpacing: 1.5, lineHeight: 1.1 }}>{steps[step].toUpperCase()}</div>
-          <div style={{ fontSize: 13, color: '#4a6a7a', marginTop: 8 }}>
-            {step === 0 && 'This is your personal fitness hub.'}
-            {step === 1 && 'Choose an avatar that represents you.'}
-            {step === 2 && 'We\'ll tailor your macros and plans to your goal.'}
-            {step === 3 && 'We\'ll use this for meal planning & shopping.'}
-          </div>
+          <div style={{ fontSize: 13, color: '#4a6a7a', marginTop: 8 }}>{stepSubs[step]}</div>
         </div>
 
         {/* Step 0 — Name */}
@@ -2700,8 +3287,7 @@ After searching, reply with ONLY a valid JSON array, no markdown:
                   <span style={{ fontSize: 26 }}>{g.emoji}</span>
                   <div>
                     <div style={{ fontFamily: "'Oswald',sans-serif", fontSize: 16, fontWeight: 700, color: localGoal === k ? accent : '#fff' }}>{g.label.toUpperCase()}</div>
-                    <div style={{ fontSize: 11, color: '#555', marginTop: 2 }}>{g.cal} cal · {g.protein}g protein/day</div>
-                    <div style={{ fontSize: 11, color: '#4a6a7a', marginTop: 1 }}>{g.desc}</div>
+                    <div style={{ fontSize: 11, color: '#555', marginTop: 2 }}>{g.desc}</div>
                   </div>
                   {localGoal === k && <span style={{ marginLeft: 'auto', color: accent, fontSize: 18 }}>✓</span>}
                 </div>
@@ -2710,8 +3296,48 @@ After searching, reply with ONLY a valid JSON array, no markdown:
           </div>
         )}
 
-        {/* Step 3 — Budget */}
+        {/* Step 3 — Body (sex picker) */}
         {step === 3 && (
+          <div>
+            <div style={{ fontSize: 10, color: '#4a6a7a', letterSpacing: 1, marginBottom: 12, textAlign: 'center' }}>BIOLOGICAL SEX (for BMR accuracy)</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 20 }}>
+              {[{ id:'male', emoji:'♂', label:'Male' }, { id:'female', emoji:'♀', label:'Female' }].map(s => (
+                <button key={s.id} onClick={() => setLocalSex(s.id)} style={{ padding: '24px 16px', borderRadius: 20, border: `2px solid ${localSex === s.id ? accent : 'rgba(255,255,255,0.1)'}`, background: localSex === s.id ? `${accent}18` : 'rgba(255,255,255,0.03)', cursor: 'pointer', textAlign: 'center' }}>
+                  <div style={{ fontSize: 40, marginBottom: 8 }}>{s.emoji}</div>
+                  <div style={{ fontFamily:"'Oswald',sans-serif", fontSize: 18, fontWeight: 700, color: localSex === s.id ? accent : '#fff' }}>{s.label}</div>
+                </button>
+              ))}
+            </div>
+            <div style={{ fontSize: 11, color: '#4a6a7a', textAlign: 'center' }}>
+              Used only for calorie calculation. You can change this later in Profile.
+            </div>
+          </div>
+        )}
+
+        {/* Step 4 — Activity level */}
+        {step === 4 && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {[
+              { id:'sedentary', emoji:'🪑', label:'Sedentary',   desc:'Desk job, no exercise' },
+              { id:'light',     emoji:'🚶', label:'Light',       desc:'1–3 workouts/week' },
+              { id:'moderate',  emoji:'🏃', label:'Moderate',    desc:'3–5 workouts/week' },
+              { id:'active',    emoji:'🏋️', label:'Active',      desc:'6–7 workouts/week' },
+              { id:'very',      emoji:'⚡', label:'Very Active', desc:'2× daily / physical job' },
+            ].map(a => (
+              <button key={a.id} onClick={() => setLocalActivity(a.id)} style={{ display:'flex', alignItems:'center', gap: 12, padding: '14px 16px', borderRadius: 16, border: `2px solid ${localActivity === a.id ? accent : 'rgba(255,255,255,0.08)'}`, background: localActivity === a.id ? `${accent}12` : 'rgba(255,255,255,0.03)', color: '#fff', cursor: 'pointer', textAlign: 'left', transition: 'all 0.15s' }}>
+                <span style={{ fontSize: 24 }}>{a.emoji}</span>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontFamily:"'Oswald',sans-serif", fontSize: 15, fontWeight: 700, color: localActivity === a.id ? accent : '#fff' }}>{a.label.toUpperCase()}</div>
+                  <div style={{ fontSize: 11, color: '#555', marginTop: 2 }}>{a.desc}</div>
+                </div>
+                {localActivity === a.id && <span style={{ color: accent, fontSize: 18 }}>✓</span>}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* Step 5 — Budget */}
+        {step === 5 && (
           <div>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12, marginBottom: 20 }}>
               <span style={{ fontSize: 36, color: accent }}>$</span>
@@ -2726,7 +3352,6 @@ After searching, reply with ONLY a valid JSON array, no markdown:
             <div style={{ textAlign: 'center', fontSize: 13, color: '#4a6a7a' }}>
               ~${(parseFloat(localBudget || 150) / 7).toFixed(0)}/day · We'll keep meal plans under this
             </div>
-            {/* Quick preset chips */}
             <div style={{ display: 'flex', justifyContent: 'center', gap: 10, marginTop: 20, flexWrap: 'wrap' }}>
               {[75, 100, 150, 200, 250].map(v => (
                 <button key={v} onClick={() => setLocalBudget(String(v))} style={{ padding: '8px 16px', borderRadius: 20, border: `1px solid ${localBudget === String(v) ? accent : 'rgba(255,255,255,0.1)'}`, background: localBudget === String(v) ? `${accent}18` : 'transparent', color: localBudget === String(v) ? accent : '#aaa', cursor: 'pointer', fontSize: 13, fontWeight: 700, fontFamily: 'inherit' }}>${v}</button>
@@ -2741,35 +3366,88 @@ After searching, reply with ONLY a valid JSON array, no markdown:
             <button onClick={() => setStep(s => s - 1)} style={{ flex: 1, padding: 16, borderRadius: 16, border: '1px solid rgba(255,255,255,0.1)', background: 'transparent', color: '#aaa', fontFamily: "'Oswald',sans-serif", fontSize: 16, fontWeight: 700, cursor: 'pointer', letterSpacing: 0.5 }}>← BACK</button>
           )}
           <button
-            onClick={() => step < 3 ? setStep(s => s + 1) : finish()}
+            onClick={() => step < 5 ? setStep(s => s + 1) : finish()}
             disabled={!canNext}
             style={{ flex: 2, padding: 16, borderRadius: 16, border: 'none', background: canNext ? accent : 'rgba(255,255,255,0.06)', color: canNext ? '#000' : '#333', fontFamily: "'Oswald',sans-serif", fontSize: 18, fontWeight: 800, cursor: canNext ? 'pointer' : 'not-allowed', letterSpacing: 1, transition: 'all 0.2s' }}
           >
-            {step < 3 ? 'NEXT →' : '🚀 LET\'S GO'}
+            {step < 5 ? 'NEXT →' : '🚀 LET\'S GO'}
           </button>
         </div>
       </div>
     );
   }
 
+  /* ── Supabase auth helpers ── */
+  async function syncProfileToSupabase(user) {
+    if (!_sb || !user) return;
+    try {
+      await _sb.from('profiles').upsert({
+        id: user.id,
+        email: user.email,
+        user_name: userName,
+        user_goal: userGoal,
+        user_sex: userSex,
+        user_age: userAge,
+        user_weight: userWeight,
+        user_height: userHeight,
+        activity_level: activityLevel,
+        accent_color: accentColor,
+        earned_badges: earnedBadges,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'id' });
+      showToast('✓ Profile synced to cloud', 'success');
+    } catch(e) { console.warn('Sync error', e); }
+  }
+
+  async function handleSignIn() {
+    if (!_sb) return showToast('Supabase not configured', 'error');
+    setAuthLoading(true);
+    const { error } = await _sb.auth.signInWithPassword({ email: authEmail, password: authPassword });
+    setAuthLoading(false);
+    if (error) { showToast(error.message, 'error'); } else { setShowAuth(false); setAuthEmail(''); setAuthPassword(''); }
+  }
+
+  async function handleSignUp() {
+    if (!_sb) return showToast('Supabase not configured', 'error');
+    setAuthLoading(true);
+    const { error } = await _sb.auth.signUp({ email: authEmail, password: authPassword });
+    setAuthLoading(false);
+    if (error) { showToast(error.message, 'error'); }
+    else { showToast('Check your email to confirm!', 'success'); setShowAuth(false); setAuthEmail(''); setAuthPassword(''); }
+  }
+
+  async function handleGoogleAuth() {
+    if (!_sb) return showToast('Supabase not configured', 'error');
+    await _sb.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: window.location.href } });
+  }
+
+  async function handleSignOut() {
+    if (!_sb) return;
+    await _sb.auth.signOut();
+    setCurrentUser(null);
+  }
+
   /* ══════════════════════════════════════════════
      PROFILE SCREEN
   ══════════════════════════════════════════════ */
   function ProfileScreen() {
-    const [pTab, setPTab] = useState('profile');
-    const [editMode, setEditMode] = useState(false);
-    const [lName,   setLName]   = useState(userName);
-    const [lBio,    setLBio]    = useState(userBio);
-    const [lAge,    setLAge]    = useState(userAge);
-    const [lWeight, setLWeight] = useState(userWeight);
-    const [lHeight, setLHeight] = useState(userHeight);
-    const [lAvatar, setLAvatar] = useState(userAvatar);
-    const [showAvatarPicker, setShowAvatarPicker] = useState(false);
-    const [sKey2,      setSKey2]      = useState(apiKey);
-    const [sUrl2,      setSUrl2]      = useState(vercelUrl);
-    const [sBudget2,   setSBudget2]   = useState(String(weekBudget));
-    const [sVault2,    setSVault2]    = useState(vaultName);
-    const [sFirebase2, setSFirebase2] = useState(firebaseUrl);
+    /* All state hoisted to parent — uses pTab/profileEdit/pLName/etc. */
+    const editMode = profileEdit;
+    const setEditMode = setProfileEdit;
+    const lName = pLName; const setLName = setPLName;
+    const lBio = pLBio; const setLBio = setPLBio;
+    const lAge = pLAge; const setLAge = setPLAge;
+    const lWeight = pLWeight; const setLWeight = setPLWeight;
+    const lHeight = pLHeight; const setLHeight = setPLHeight;
+    const lAvatar = pLAvatar; const setLAvatar = setPLAvatar;
+    const lSex = pLSex; const setLSex = setPLSex;
+    const lActivity = pLActivity; const setLActivity = setPLActivity;
+    const sKey2 = pSKey; const setSKey2 = setPSKey;
+    const sUrl2 = pSUrl; const setSUrl2 = setPSUrl;
+    const sBudget2 = pSBudget; const setSBudget2 = setPSBudget;
+    const sVault2 = pSVault; const setSVault2 = setPSVault;
+    const sSupaUrl = pSSupaUrl; const setSSupaUrl = setPSSupaUrl;
+    const sSupaKey = pSSupaKey; const setSSupaKey = setPSSupaKey;
 
     const avatarOptions = ['💪','🏋️','🔥','⚡','🦾','🥊','🏃','🧠','🎯','🥷','🦅','🌊','🐺','⚔️','🛡️','💎','🌟','🚀','😤','👊','🏆','🎯','🔱','⚡','🧬','🫀','💯','🦁'];
     const ACCENT_PRESETS = [
@@ -2795,6 +3473,13 @@ After searching, reply with ONLY a valid JSON array, no markdown:
       setUserWeight(lWeight);
       setUserHeight(lHeight);
       setUserAvatar(lAvatar);
+      setUserSex(lSex);
+      setActivityLevel(lActivity);
+      // log weight if it changed
+      const wNum = parseFloat(lWeight);
+      if (wNum && wNum !== parseFloat(userWeight)) {
+        setWeightLog(prev => [...prev, { date: (function(){ const d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); })(), weight: wNum }]);
+      }
       setEditMode(false);
       showToast('Profile updated ✓', 'success');
     }
@@ -2874,33 +3559,87 @@ After searching, reply with ONLY a valid JSON array, no markdown:
               {/* Physical stats */}
               <div style={{ fontSize: 10, color: '#4a6a7a', letterSpacing: 1, marginBottom: 10 }}>PHYSICAL STATS</div>
               {editMode ? (
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 16 }}>
-                  {[
-                    { label: 'Age', val: lAge, set: setLAge, placeholder: 'e.g. 28', unit: 'yrs' },
-                    { label: 'Weight', val: lWeight, set: setLWeight, placeholder: 'e.g. 185', unit: 'lbs' },
-                    { label: 'Height', val: lHeight, set: setLHeight, placeholder: 'e.g. 5\'11"', unit: '' },
-                  ].map(f => (
-                    <div key={f.label} style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 14, padding: 12, border: '1px solid rgba(255,255,255,0.06)' }}>
-                      <div style={{ fontSize: 9, color: '#4a6a7a', letterSpacing: 0.5, marginBottom: 6 }}>{f.label.toUpperCase()}</div>
-                      <input value={f.val} onChange={e => f.set(e.target.value)} placeholder={f.placeholder} style={{ width: '100%', background: 'transparent', border: 'none', color: '#fff', fontSize: 16, fontFamily: "'Oswald',sans-serif", outline: 'none', fontWeight: 600 }} />
-                      {f.unit && <div style={{ fontSize: 9, color: '#555', marginTop: 2 }}>{f.unit}</div>}
-                    </div>
-                  ))}
+                <div style={{ marginBottom: 16 }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 8 }}>
+                    {[
+                      { label: 'Age',    val: lAge,    set: setLAge,    placeholder: 'e.g. 28',    unit: 'yrs' },
+                      { label: 'Weight', val: lWeight, set: setLWeight, placeholder: 'e.g. 185',   unit: 'lbs' },
+                      { label: 'Height', val: lHeight, set: setLHeight, placeholder: "e.g. 5'11\"", unit: '' },
+                    ].map(f => (
+                      <div key={f.label} style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 14, padding: 12, border: '1px solid rgba(255,255,255,0.06)' }}>
+                        <div style={{ fontSize: 9, color: '#4a6a7a', letterSpacing: 0.5, marginBottom: 6 }}>{f.label.toUpperCase()}</div>
+                        <input value={f.val} onChange={e => f.set(e.target.value)} placeholder={f.placeholder} style={{ width: '100%', background: 'transparent', border: 'none', color: '#fff', fontSize: 16, fontFamily: "'Oswald',sans-serif", outline: 'none', fontWeight: 600 }} />
+                        {f.unit && <div style={{ fontSize: 9, color: '#555', marginTop: 2 }}>{f.unit}</div>}
+                      </div>
+                    ))}
+                  </div>
+                  {/* Sex selector */}
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
+                    {[{ id:'male', label:'♂ Male' }, { id:'female', label:'♀ Female' }].map(s => (
+                      <button key={s.id} onClick={() => setLSex(s.id)} style={{ padding: '11px 8px', borderRadius: 12, border: `2px solid ${lSex === s.id ? accentColor : 'rgba(255,255,255,0.1)'}`, background: lSex === s.id ? `${accentColor}18` : 'rgba(255,255,255,0.03)', color: lSex === s.id ? accentColor : '#aaa', fontSize: 13, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>{s.label}</button>
+                    ))}
+                  </div>
+                  {/* Activity level selector */}
+                  <div style={{ fontSize: 9, color: '#4a6a7a', letterSpacing: 1, marginBottom: 6 }}>ACTIVITY LEVEL</div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    {[
+                      { id:'sedentary', label:'Sedentary',   desc:'Desk job, no exercise' },
+                      { id:'light',     label:'Light',       desc:'1–3 workouts/week' },
+                      { id:'moderate',  label:'Moderate',    desc:'3–5 workouts/week' },
+                      { id:'active',    label:'Active',      desc:'6–7 workouts/week' },
+                      { id:'very',      label:'Very Active', desc:'2× daily / physical job' },
+                    ].map(a => (
+                      <button key={a.id} onClick={() => setLActivity(a.id)} style={{ display:'flex', justifyContent:'space-between', alignItems:'center', padding: '10px 14px', borderRadius: 12, border: `1px solid ${lActivity === a.id ? accentColor : 'rgba(255,255,255,0.07)'}`, background: lActivity === a.id ? `${accentColor}15` : 'rgba(255,255,255,0.02)', cursor: 'pointer', textAlign:'left' }}>
+                        <div>
+                          <span style={{ fontSize: 13, fontWeight: 700, color: lActivity === a.id ? accentColor : '#ddd', fontFamily:"'Oswald',sans-serif" }}>{a.label}</span>
+                          <span style={{ fontSize: 11, color: '#555', marginLeft: 8 }}>{a.desc}</span>
+                        </div>
+                        {lActivity === a.id && <span style={{ color: accentColor, fontSize: 14 }}>✓</span>}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               ) : (
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 20 }}>
-                  {[
-                    { label: 'Age',    value: userAge    || '—', sub: 'years',   color: '#F59E0B' },
-                    { label: 'Weight', value: userWeight || '—', sub: 'lbs',     color: '#FF6B4A' },
-                    { label: 'Height', value: userHeight || '—', sub: '',        color: '#4A9EFF' },
-                  ].map((s, i) => (
-                    <div key={i} style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 14, padding: '14px 10px', textAlign: 'center', border: '1px solid rgba(255,255,255,0.06)' }}>
-                      <div style={{ fontFamily: "'Bebas Neue',sans-serif", fontSize: 26, color: s.color, lineHeight: 1 }}>{s.value}</div>
-                      <div style={{ fontSize: 9, color: '#3a5a6a', letterSpacing: 0.5, marginTop: 3 }}>{s.sub || s.label.toUpperCase()}</div>
+                <div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 8 }}>
+                    {[
+                      { label: 'Age',    value: userAge    || '—', sub: 'years',   color: '#F59E0B' },
+                      { label: 'Weight', value: userWeight || '—', sub: 'lbs',     color: '#FF6B4A' },
+                      { label: 'Height', value: userHeight || '—', sub: '',        color: '#4A9EFF' },
+                    ].map((s, i) => (
+                      <div key={i} style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 14, padding: '14px 10px', textAlign: 'center', border: '1px solid rgba(255,255,255,0.06)' }}>
+                        <div style={{ fontFamily: "'Bebas Neue',sans-serif", fontSize: 26, color: s.color, lineHeight: 1 }}>{s.value}</div>
+                        <div style={{ fontSize: 9, color: '#3a5a6a', letterSpacing: 0.5, marginTop: 3 }}>{s.sub || s.label.toUpperCase()}</div>
+                      </div>
+                    ))}
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 20 }}>
+                    <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 14, padding: '12px 10px', textAlign: 'center', border: '1px solid rgba(255,255,255,0.06)' }}>
+                      <div style={{ fontSize: 18, marginBottom: 2 }}>{userSex === 'female' ? '♀' : '♂'}</div>
+                      <div style={{ fontSize: 11, color: accentColor, fontWeight: 700 }}>{userSex === 'female' ? 'Female' : 'Male'}</div>
+                      <div style={{ fontSize: 9, color: '#3a5a6a', letterSpacing: 0.5, marginTop: 2 }}>SEX</div>
                     </div>
-                  ))}
+                    <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 14, padding: '12px 10px', textAlign: 'center', border: '1px solid rgba(255,255,255,0.06)' }}>
+                      <div style={{ fontSize: 11, color: accentColor, fontWeight: 700, textTransform: 'uppercase' }}>{activityLevel || 'Moderate'}</div>
+                      <div style={{ fontSize: 9, color: '#3a5a6a', letterSpacing: 0.5, marginTop: 2 }}>ACTIVITY</div>
+                    </div>
+                  </div>
                 </div>
               )}
+
+              {/* Badges */}
+              <div style={{ fontSize: 10, color: '#4a6a7a', letterSpacing: 1, marginBottom: 10, marginTop: 4 }}>BADGES</div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 20 }}>
+                {BADGES.map(b => {
+                  const earned = earnedBadges.includes(b.id);
+                  return (
+                    <div key={b.id} title={b.desc} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 12px', borderRadius: 20, background: earned ? `${accentColor}18` : 'rgba(255,255,255,0.03)', border: `1px solid ${earned ? accentColor : 'rgba(255,255,255,0.06)'}`, opacity: earned ? 1 : 0.4 }}>
+                      <span style={{ fontSize: 16, filter: earned ? 'none' : 'grayscale(1)' }}>{b.emoji}</span>
+                      <span style={{ fontSize: 10, color: earned ? accentColor : '#555', fontWeight: 700 }}>{b.name.toUpperCase()}</span>
+                    </div>
+                  );
+                })}
+              </div>
 
               {/* Workout streak */}
               <div style={{ fontSize: 10, color: '#4a6a7a', letterSpacing: 1, marginBottom: 10 }}>RECENT WORKOUTS</div>
@@ -2925,6 +3664,219 @@ After searching, reply with ONLY a valid JSON array, no markdown:
           {/* ── GOALS TAB ── */}
           {pTab === 'goals' && (
             <div>
+              {/* XP / LEVEL CARD */}
+              {(() => {
+                const lv = getLevelInfo(userXP);
+                return (
+                  <div style={{ background:`linear-gradient(135deg, ${accentColor}18, rgba(168,85,247,0.12))`, borderRadius:20, padding:'16px 18px', border:`1px solid ${accentColor}30`, marginBottom:16 }}>
+                    <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:10 }}>
+                      <div>
+                        <div style={{ fontSize:10, color:accentColor, letterSpacing:1, fontWeight:700, marginBottom:2 }}>🎮 LEVEL SYSTEM</div>
+                        <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:28, color:'#fff', lineHeight:1 }}>
+                          {lv.emoji} {lv.name.toUpperCase()} <span style={{ color:accentColor }}>LV.{lv.level}</span>
+                        </div>
+                        <div style={{ fontSize:11, color:'#555', marginTop:2 }}>{userXP.toLocaleString()} XP total</div>
+                      </div>
+                      <button onClick={() => setShowCheckIn(true)}
+                        style={{ padding:'8px 14px', borderRadius:12, border:`1px solid ${accentColor}50`, background:`${accentColor}20`, color:accentColor, fontSize:11, fontFamily:"'Oswald',sans-serif", fontWeight:700, cursor:'pointer', whiteSpace:'nowrap' }}>
+                        📋 CHECK IN
+                      </button>
+                    </div>
+                    {lv.next && (
+                      <div>
+                        <div style={{ display:'flex', justifyContent:'space-between', fontSize:10, color:'#555', marginBottom:4 }}>
+                          <span>Progress to {lv.next.emoji} {lv.next.name}</span>
+                          <span style={{ color:'#aaa' }}>{lv.xpToNext} XP to go</span>
+                        </div>
+                        <div style={{ height:6, borderRadius:3, background:'rgba(255,255,255,0.06)', overflow:'hidden' }}>
+                          <div style={{ height:'100%', borderRadius:3, background:`linear-gradient(90deg,${accentColor},#A855F7)`, width:`${Math.round(lv.progress*100)}%`, transition:'width 0.5s' }} />
+                        </div>
+                      </div>
+                    )}
+                    {!lv.next && <div style={{ fontSize:12, color:accentColor, fontWeight:700 }}>🏆 MAX LEVEL REACHED</div>}
+                  </div>
+                );
+              })()}
+
+              {/* WEIGHT MINI CHART */}
+              {weightLog.length >= 2 && (() => {
+                const trend = getWeightTrend(14);
+                const pts = weightLog.slice(-20);
+                const minW = Math.min(...pts.map(p=>p.weight)) - 1;
+                const maxW = Math.max(...pts.map(p=>p.weight)) + 1;
+                const W = 280, H = 60, pad = 10;
+                const x = i => pad + (i / (pts.length - 1)) * (W - pad*2);
+                const y = w => H - pad - ((w - minW) / (maxW - minW)) * (H - pad*2);
+                const polyline = pts.map((p,i) => `${x(i)},${y(p.weight)}`).join(' ');
+                const areaPath = `M${x(0)},${H} L${pts.map((p,i)=>`${x(i)},${y(p.weight)}`).join(' L')} L${x(pts.length-1)},${H} Z`;
+                return (
+                  <div style={{ background:'rgba(255,255,255,0.03)', borderRadius:16, padding:'14px 16px', border:'1px solid rgba(255,255,255,0.06)', marginBottom:16 }}>
+                    <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:10 }}>
+                      <div style={{ fontSize:10, color:'#4a6a7a', letterSpacing:1 }}>⚖️ WEIGHT TREND</div>
+                      {trend && (
+                        <div style={{ fontSize:12, fontWeight:700, color: trend.delta < 0 ? accentColor : trend.delta > 0 ? '#FF6B4A' : '#F5C842' }}>
+                          {trend.delta > 0 ? '+' : ''}{trend.delta} lbs / {trend.days}d
+                        </div>
+                      )}
+                    </div>
+                    <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{ overflow:'visible' }}>
+                      <defs>
+                        <linearGradient id="wg" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stopColor={accentColor} stopOpacity="0.3" />
+                          <stop offset="100%" stopColor={accentColor} stopOpacity="0" />
+                        </linearGradient>
+                      </defs>
+                      <path d={areaPath} fill="url(#wg)" />
+                      <polyline points={polyline} fill="none" stroke={accentColor} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                      {pts.slice(-1).map((p,_) => (
+                        <circle key="last" cx={x(pts.length-1)} cy={y(p.weight)} r="4" fill={accentColor} />
+                      ))}
+                    </svg>
+                    <div style={{ display:'flex', justifyContent:'space-between', fontSize:10, color:'#4a6a7a', marginTop:4 }}>
+                      <span>{pts[0]?.date?.slice(5)}</span>
+                      <span style={{ color:'#aaa', fontWeight:700 }}>{pts[pts.length-1]?.weight} lbs</span>
+                      <span>{pts[pts.length-1]?.date?.slice(5)}</span>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* ── STREAK CALENDAR ── */}
+              {StreakCalendar()}
+
+              {/* ── AUTO-ADJUST BANNER ── */}
+              {(() => {
+                const adj = computeAutoAdjust();
+                if (!adj) return null;
+                return (
+                  <div style={{ borderRadius:16, padding:'14px 16px', border:`1px solid ${adj.color}40`, background:`${adj.color}10`, marginBottom:16 }}>
+                    <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start' }}>
+                      <div style={{ flex:1 }}>
+                        <div style={{ fontSize:11, fontWeight:700, color:adj.color, marginBottom:4 }}>
+                          {adj.icon} LEVEL AUTO-ADJUST · {adj.title}
+                        </div>
+                        <div style={{ fontSize:12, color:'#aaa', lineHeight:1.5, marginBottom: adj.actionLabel ? 10 : 0 }}>{adj.msg}</div>
+                        {adj.actionLabel && adj.action && (
+                          <button onClick={() => { adj.action(); setAdjustDismissed(todayStr()); }}
+                            style={{ padding:'7px 14px', borderRadius:10, border:`1px solid ${adj.color}60`, background:`${adj.color}20`, color:adj.color, fontSize:11, fontFamily:"'Oswald',sans-serif", fontWeight:700, cursor:'pointer' }}>
+                            ✓ {adj.actionLabel}
+                          </button>
+                        )}
+                      </div>
+                      <button onClick={() => setAdjustDismissed(todayStr())}
+                        style={{ background:'none', border:'none', color:'#555', fontSize:16, cursor:'pointer', paddingLeft:8, flexShrink:0 }}>✕</button>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* ── WEEKLY REVIEW ── */}
+              {(() => {
+                const ws = getWeekStart();
+                const wd = getWeekData(ws);
+                const hasThisWeek = weeklyReview?.weekStart === ws;
+                return (
+                  <div style={{ background:'rgba(255,255,255,0.03)', borderRadius:16, padding:'14px 16px', border:'1px solid rgba(255,255,255,0.06)', marginBottom:16 }}>
+                    <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:10 }}>
+                      <div style={{ fontSize:10, color:'#4a6a7a', letterSpacing:1 }}>📊 WEEKLY REVIEW</div>
+                      <button onClick={generateWeeklyReview} disabled={reviewLoading || hasThisWeek}
+                        style={{ fontSize:10, padding:'5px 10px', borderRadius:8, border:`1px solid ${hasThisWeek ? accentColor+'40' : 'rgba(168,85,247,0.4)'}`, background: hasThisWeek ? `${accentColor}15` : 'rgba(168,85,247,0.12)', color: hasThisWeek ? accentColor : '#A855F7', cursor: hasThisWeek ? 'default' : 'pointer', fontFamily:"'Oswald',sans-serif", fontWeight:700 }}>
+                        {reviewLoading ? '⏳ ANALYZING…' : hasThisWeek ? '✓ THIS WEEK' : '🧠 GENERATE'}
+                      </button>
+                    </div>
+                    {/* Week stats mini-grid */}
+                    <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:6, marginBottom: weeklyReview ? 12 : 0 }}>
+                      {[
+                        { label:'LOGGED', value:`${wd.loggedDays}/7 days`, color:'#4A9EFF' },
+                        { label:'WORKOUTS', value:`${wd.workoutsInWeek} sessions`, color:accentColor },
+                        { label:'AVG CAL', value:`${wd.avgCal||0} kcal`, color:'#FF6B4A' },
+                        { label:'AVG PRO', value:`${wd.avgPro||0}g`, color:accentColor },
+                        { label:'AVG ENERGY', value: wd.avgEnergy ? `${wd.avgEnergy}/10` : '—', color:'#F5C842' },
+                        { label:'WEIGHT Δ', value: wd.weightDelta !== null ? `${wd.weightDelta > 0 ? '+' : ''}${wd.weightDelta}lbs` : '—', color: wd.weightDelta < 0 ? accentColor : '#FF6B4A' },
+                      ].map(s => (
+                        <div key={s.label} style={{ background:'rgba(0,0,0,0.2)', borderRadius:10, padding:'8px 6px', textAlign:'center' }}>
+                          <div style={{ fontSize:12, fontWeight:700, color:s.color, lineHeight:1 }}>{s.value}</div>
+                          <div style={{ fontSize:8, color:'#444', marginTop:2, letterSpacing:0.5 }}>{s.label}</div>
+                        </div>
+                      ))}
+                    </div>
+                    {weeklyReview && (
+                      <div style={{ padding:'12px 14px', borderRadius:12, background:'rgba(168,85,247,0.08)', border:'1px solid rgba(168,85,247,0.2)' }}>
+                        <div style={{ fontSize:10, color:'#A855F7', letterSpacing:1, fontWeight:700, marginBottom:6 }}>🧠 LEVEL SAYS · Week of {weeklyReview.weekStart}</div>
+                        <div style={{ fontSize:12, color:'#ccc', lineHeight:1.6 }}>{weeklyReview.text}</div>
+                      </div>
+                    )}
+                    {!weeklyReview && !reviewLoading && (
+                      <div style={{ fontSize:11, color:'#444', textAlign:'center', paddingTop:4 }}>Hit Generate for your AI-powered weekly breakdown</div>
+                    )}
+                  </div>
+                );
+              })()}
+
+              {/* RECENT CHECK-INS */}
+              {checkIns.length > 0 && (
+                <div style={{ background:'rgba(255,255,255,0.03)', borderRadius:16, padding:'14px 16px', border:'1px solid rgba(255,255,255,0.06)', marginBottom:16 }}>
+                  <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:10 }}>
+                    <div style={{ fontSize:10, color:'#4a6a7a', letterSpacing:1 }}>📊 RECENT CHECK-INS</div>
+                    <button onClick={generateLevelInsight} disabled={insightLoading}
+                      style={{ fontSize:10, padding:'5px 10px', borderRadius:8, border:`1px solid ${accentColor}40`, background:`${accentColor}15`, color:accentColor, cursor:'pointer', fontFamily:"'Oswald',sans-serif", fontWeight:700 }}>
+                      {insightLoading ? '...' : '🧠 LEVEL INSIGHT'}
+                    </button>
+                  </div>
+                  {checkIns.slice(-5).reverse().map((ci,i) => (
+                    <div key={i} style={{ display:'flex', gap:12, padding:'8px 0', borderTop: i > 0 ? '1px solid rgba(255,255,255,0.04)' : undefined, alignItems:'center' }}>
+                      <div style={{ fontSize:10, color:'#555', minWidth:50 }}>{ci.date?.slice(5)}</div>
+                      <div style={{ display:'flex', gap:8, flex:1, flexWrap:'wrap' }}>
+                        <span style={{ fontSize:11, color:'#aaa' }}>⚡{ci.energy}</span>
+                        <span style={{ fontSize:11, color:'#aaa' }}>🍽️{ci.hunger}</span>
+                        <span style={{ fontSize:11, color:'#aaa' }}>🥗{ci.dietScore}</span>
+                        {ci.workoutDone && <span style={{ fontSize:11, color:accentColor }}>💪Done</span>}
+                        {ci.weight && <span style={{ fontSize:11, color:'#F5C842' }}>{ci.weight}lbs</span>}
+                      </div>
+                    </div>
+                  ))}
+                  {levelInsight && (
+                    <div style={{ marginTop:12, padding:'12px 14px', borderRadius:12, background:'rgba(168,85,247,0.08)', border:'1px solid rgba(168,85,247,0.2)' }}>
+                      <div style={{ fontSize:10, color:'#A855F7', letterSpacing:1, fontWeight:700, marginBottom:6 }}>🧠 LEVEL SAYS · {levelInsight.date}</div>
+                      <div style={{ fontSize:12, color:'#ccc', lineHeight:1.6, whiteSpace:'pre-wrap' }}>{levelInsight.text}</div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Dynamic calorie summary card */}
+              {goal.dynamic ? (
+                <div style={{ background: `${accentColor}12`, borderRadius: 20, padding: '16px 18px', border: `1px solid ${accentColor}30`, marginBottom: 20 }}>
+                  <div style={{ fontSize: 10, color: accentColor, letterSpacing: 1, fontWeight: 700, marginBottom: 10 }}>⚡ YOUR CALCULATED TARGETS</div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 6, marginBottom: 12 }}>
+                    {[
+                      { label: 'CALORIES', value: goal.cal,     color: '#FF6B4A', unit: 'kcal' },
+                      { label: 'PROTEIN',  value: goal.protein, color: accentColor, unit: 'g' },
+                      { label: 'CARBS',    value: goal.carbs,   color: '#A855F7', unit: 'g' },
+                      { label: 'FAT',      value: goal.fat,     color: '#F5C842', unit: 'g' },
+                    ].map(m => (
+                      <div key={m.label} style={{ textAlign: 'center', background: 'rgba(0,0,0,0.2)', borderRadius: 12, padding: '10px 4px' }}>
+                        <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize: 22, color: m.color, lineHeight: 1 }}>{m.value}</div>
+                        <div style={{ fontSize: 8, color: '#4a6a7a', letterSpacing: 0.5, marginTop: 2 }}>{m.label}</div>
+                        <div style={{ fontSize: 8, color: '#3a5a6a' }}>{m.unit}</div>
+                      </div>
+                    ))}
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: '#4a6a7a' }}>
+                    <span>BMR: <span style={{ color: '#aaa' }}>{goal.bmr} kcal</span></span>
+                    <span>TDEE: <span style={{ color: '#aaa' }}>{goal.tdee} kcal</span></span>
+                    <span>Goal adj: <span style={{ color: '#aaa' }}>{GOAL_ADJUSTMENTS[userGoal] >= 0 ? '+' : ''}{GOAL_ADJUSTMENTS[userGoal]} kcal</span></span>
+                  </div>
+                </div>
+              ) : (
+                <div style={{ background: 'rgba(255,165,0,0.08)', borderRadius: 14, padding: '12px 14px', border: '1px solid rgba(255,165,0,0.2)', marginBottom: 16 }}>
+                  <div style={{ fontSize: 11, color: '#F59E0B', fontWeight: 700, marginBottom: 4 }}>📋 USING PRESET TARGETS</div>
+                  <div style={{ fontSize: 11, color: '#4a6a7a' }}>
+                    Add your age, weight, height + activity level in the Profile tab for a personalized calorie target calculated just for your body.
+                  </div>
+                </div>
+              )}
+
               <div style={{ fontSize: 10, color: '#4a6a7a', letterSpacing: 1, marginBottom: 12 }}>TRAINING GOAL</div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 24 }}>
                 {Object.entries(GOAL_PRESETS).map(([k, g]) => (
@@ -2933,21 +3885,29 @@ After searching, reply with ONLY a valid JSON array, no markdown:
                       <span style={{ fontSize: 26 }}>{g.emoji}</span>
                       <div style={{ flex: 1 }}>
                         <div style={{ fontFamily: "'Oswald',sans-serif", fontSize: 15, fontWeight: 700, color: userGoal === k ? accentColor : '#fff' }}>{g.label.toUpperCase()}</div>
-                        <div style={{ fontSize: 11, color: '#555', marginTop: 1 }}>{g.cal} cal · {g.protein}g protein · {g.carbs}g carbs · {g.fat}g fat</div>
-                        <div style={{ fontSize: 11, color: '#4a6a7a', marginTop: 1 }}>{g.desc}</div>
+                        <div style={{ fontSize: 11, color: '#555', marginTop: 1 }}>{g.desc}</div>
+                        {userGoal === k && goal.dynamic && (
+                          <div style={{ fontSize: 11, color: accentColor, marginTop: 2 }}>
+                            {goal.cal} cal · {goal.protein}g protein · {goal.carbs}g carbs · {goal.fat}g fat
+                          </div>
+                        )}
+                        {!(userGoal === k && goal.dynamic) && (
+                          <div style={{ fontSize: 11, color: '#444', marginTop: 2 }}>{g.cal} cal · {g.protein}g protein</div>
+                        )}
                       </div>
                       {userGoal === k && <span style={{ color: accentColor, fontSize: 18 }}>✓</span>}
                     </div>
                   </button>
                 ))}
               </div>
+
               {/* Today's macros progress */}
               <div style={{ fontSize: 10, color: '#4a6a7a', letterSpacing: 1, marginBottom: 12 }}>TODAY'S PROGRESS</div>
               {[
-                { label: 'Calories', cur: todayCal,  target: GOAL_PRESETS[userGoal].cal,     color: '#FF6B4A', unit: 'kcal' },
-                { label: 'Protein',  cur: todayPro,  target: GOAL_PRESETS[userGoal].protein, color: accentColor, unit: 'g' },
-                { label: 'Carbs',    cur: todayCarb, target: GOAL_PRESETS[userGoal].carbs,   color: '#4A9EFF', unit: 'g' },
-                { label: 'Fat',      cur: todayFat,  target: GOAL_PRESETS[userGoal].fat,     color: '#F59E0B', unit: 'g' },
+                { label: 'Calories', cur: todayCal,  target: goal.cal,     color: '#FF6B4A', unit: 'kcal' },
+                { label: 'Protein',  cur: todayPro,  target: goal.protein, color: accentColor, unit: 'g' },
+                { label: 'Carbs',    cur: todayCarb, target: goal.carbs,   color: '#4A9EFF', unit: 'g' },
+                { label: 'Fat',      cur: todayFat,  target: goal.fat,     color: '#F59E0B', unit: 'g' },
               ].map(m => (
                 <div key={m.label} style={{ marginBottom: 14 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 5 }}>
@@ -3018,8 +3978,38 @@ After searching, reply with ONLY a valid JSON array, no markdown:
                 <span style={{ fontSize: 12, color: '#555' }}>/week</span>
               </div>
 
-              <div style={{ fontSize: 10, color: '#4a6a7a', letterSpacing: 1, marginBottom: 8 }}>CLAUDE API KEY</div>
-              <input type="password" value={sKey2} onChange={e => setSKey2(e.target.value)} placeholder="sk-ant-…" style={inp} />
+              {/* ── Account / Supabase ── */}
+              <div style={{ marginBottom: 16, padding: '14px 14px', background: currentUser ? 'rgba(75,222,128,0.06)' : 'rgba(74,158,255,0.06)', borderRadius: 14, border: `1px solid ${currentUser ? 'rgba(75,222,128,0.2)' : 'rgba(74,158,255,0.15)'}` }}>
+                <div style={{ fontSize: 11, color: currentUser ? '#4BDE80' : '#4A9EFF', fontWeight: 700, marginBottom: 6 }}>☁️ CLOUD ACCOUNT</div>
+                {currentUser ? (
+                  <div>
+                    <div style={{ fontSize: 12, color: '#ddd', marginBottom: 10 }}>✓ Signed in as <span style={{ color: '#4BDE80' }}>{currentUser.email}</span></div>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <button onClick={() => syncProfileToSupabase(currentUser)} style={{ flex: 1, padding: '9px 8px', borderRadius: 10, border: '1px solid rgba(75,222,128,0.3)', background: 'rgba(75,222,128,0.1)', color: '#4BDE80', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>⬆ SYNC NOW</button>
+                      <button onClick={handleSignOut} style={{ flex: 1, padding: '9px 8px', borderRadius: 10, border: '1px solid rgba(255,80,80,0.3)', background: 'rgba(255,80,80,0.08)', color: '#ff6b6b', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>SIGN OUT</button>
+                    </div>
+                  </div>
+                ) : (
+                  <div>
+                    <div style={{ fontSize: 11, color: '#4a6a7a', marginBottom: 10 }}>Sign in to back up your data & sync across devices</div>
+                    <button onClick={() => setShowAuth(true)} style={{ width: '100%', padding: '11px 14px', borderRadius: 10, border: 'none', background: '#4A9EFF', color: '#000', fontFamily: "'Oswald',sans-serif", fontSize: 14, fontWeight: 700, cursor: 'pointer' }}>SIGN IN / CREATE ACCOUNT</button>
+                  </div>
+                )}
+              </div>
+
+              {/* AI Route status */}
+              <div style={{ padding:'10px 12px', borderRadius:12, border:`1px solid ${_sb ? accentColor+'40' : 'rgba(255,165,0,0.4)'}`, background: _sb ? `${accentColor}0a` : 'rgba(255,165,0,0.08)', marginBottom:12 }}>
+                <div style={{ fontSize:11, fontWeight:700, color: _sb ? accentColor : '#F59E0B', marginBottom:3 }}>
+                  {_sb ? '✅ AI ROUTED VIA EDGE FUNCTION' : '⚠️ EDGE FUNCTION NOT CONNECTED'}
+                </div>
+                <div style={{ fontSize:10, color:'#555', lineHeight:1.5 }}>
+                  {_sb
+                    ? 'AI calls run server-side — no personal key needed. Add your Anthropic key as ANTHROPIC_KEY in Supabase Edge Function Secrets to enable.'
+                    : 'Sign in above to use server-side AI. Or enter your Claude API key below as a fallback.'}
+                </div>
+              </div>
+              <div style={{ fontSize: 10, color: '#4a6a7a', letterSpacing: 1, marginBottom: 8 }}>CLAUDE API KEY <span style={{ color:'#555' }}>(fallback if not signed in)</span></div>
+              <input type="password" value={sKey2} onChange={e => setSKey2(e.target.value)} placeholder="sk-ant-… (paste here to also use as Supabase ANTHROPIC_KEY secret)" style={inp} />
 
               <div style={{ fontSize: 10, color: '#4a6a7a', letterSpacing: 1, marginBottom: 8, marginTop: 4 }}>VERCEL URL (TikTok / Instagram import)</div>
               <input value={sUrl2} onChange={e => setSUrl2(e.target.value)} placeholder="https://your-app.vercel.app" style={inp} />
@@ -3027,12 +4017,16 @@ After searching, reply with ONLY a valid JSON array, no markdown:
               <div style={{ fontSize: 10, color: '#4a6a7a', letterSpacing: 1, marginBottom: 8 }}>OBSIDIAN VAULT NAME</div>
               <input value={sVault2} onChange={e => setSVault2(e.target.value)} placeholder="My Vault" style={inp} />
 
-              {/* Firebase URL — required for real-time challenges */}
-              <div style={{ marginTop: 4 }}>
-                <div style={{ fontSize: 10, color: '#4a6a7a', letterSpacing: 1, marginBottom: 4 }}>FIREBASE DATABASE URL <span style={{ color: sFirebase2 ? accentColor : '#FF6B4A' }}>{sFirebase2 ? '✓ CONNECTED' : '⚡ NEEDED FOR CHALLENGES'}</span></div>
-                <input value={sFirebase2} onChange={e => setSFirebase2(e.target.value)} placeholder="https://your-project-default-rtdb.firebaseio.com" style={{ ...inp, border: `1px solid ${sFirebase2 ? accentColor + '50' : 'rgba(255,107,74,0.4)'}` }} />
-                <div style={{ fontSize: 10, color: '#3a5a6a', marginBottom: 8, lineHeight: 1.5 }}>
-                  Free setup: <span style={{ color: '#fff' }}>firebase.google.com</span> → New project → Realtime Database → Start in test mode → copy the URL shown. Takes 2 min.
+              <div style={{ fontSize: 10, color: '#4a6a7a', letterSpacing: 1, marginBottom: 8 }}>SUPABASE URL (override)</div>
+              <input value={sSupaUrl} onChange={e => setSSupaUrl(e.target.value)} placeholder={SUPABASE_URL_DEFAULT} style={inp} />
+              <div style={{ fontSize: 10, color: '#4a6a7a', letterSpacing: 1, marginBottom: 8 }}>SUPABASE ANON KEY (override)</div>
+              <input type="password" value={sSupaKey} onChange={e => setSSupaKey(e.target.value)} placeholder="eyJ…" style={inp} />
+
+              {/* Real-time challenges — built in, no setup needed */}
+              <div style={{ marginTop: 4, marginBottom: 16, padding: '12px 14px', background: `${accentColor}0a`, borderRadius: 12, border: `1px solid ${accentColor}25` }}>
+                <div style={{ fontSize: 11, color: accentColor, fontWeight: 700, marginBottom: 4 }}>📡 CHALLENGES SYNC — NO SETUP NEEDED</div>
+                <div style={{ fontSize: 11, color: '#4a6a7a', lineHeight: 1.5 }}>
+                  Real-time P2P sync is built in. Create a challenge, share the link — progress updates automatically for everyone. No accounts, no keys.
                 </div>
               </div>
 
@@ -3040,14 +4034,16 @@ After searching, reply with ONLY a valid JSON array, no markdown:
                 setApiKey(sKey2); setVercelUrl(sUrl2);
                 setWeekBudget(parseFloat(sBudget2) || 150);
                 setVaultName(sVault2);
-                setFirebaseUrl(sFirebase2.trim());
+                if (sSupaUrl) localStorage.setItem('supabaseUrl', sSupaUrl);
+                if (sSupaKey) localStorage.setItem('supabaseKey', sSupaKey);
+                if (sSupaUrl || sSupaKey) initSupabase(sSupaUrl, sSupaKey);
                 showToast('App settings saved ✓', 'success');
               }} style={{ width: '100%', padding: 14, borderRadius: 14, border: 'none', background: accentColor, color: '#000', fontFamily: "'Oswald',sans-serif", fontSize: 17, fontWeight: 800, cursor: 'pointer', letterSpacing: 0.5, marginBottom: 10, marginTop: 8 }}>
                 SAVE APP SETTINGS
               </button>
 
               <button onClick={() => {
-                setApiKey(sKey2); setVercelUrl(sUrl2); setWeekBudget(parseFloat(sBudget2) || 150); setVaultName(sVault2); setFirebaseUrl(sFirebase2.trim());
+                setApiKey(sKey2); setVercelUrl(sUrl2); setWeekBudget(parseFloat(sBudget2) || 150); setVaultName(sVault2);
                 setTimeout(generateSyncLink, 50);
               }} style={{ width: '100%', padding: 13, borderRadius: 14, border: '1px solid rgba(74,158,255,0.35)', background: 'rgba(74,158,255,0.08)', color: '#4A9EFF', fontFamily: "'Oswald',sans-serif", fontSize: 15, fontWeight: 700, cursor: 'pointer', letterSpacing: 0.5, marginBottom: 16 }}>
                 📱 COPY SYNC LINK (FOR OTHER DEVICES)
@@ -3205,6 +4201,110 @@ After searching, reply with ONLY a valid JSON array, no markdown:
     );
   }
 
+  /* ── AUTH MODAL ── */
+  function AuthModal() {
+    const inp = { width: '100%', padding: '13px 14px', borderRadius: 12, border: '1px solid rgba(255,255,255,0.1)', background: 'rgba(255,255,255,0.06)', color: '#fff', fontSize: 15, fontFamily: 'inherit', outline: 'none', marginBottom: 12 };
+    return (
+      <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.88)', zIndex: 600, display: 'flex', alignItems: 'flex-end' }} onClick={e => { if (e.target === e.currentTarget) setShowAuth(false); }}>
+        <div style={{ width: '100%', maxWidth: 480, margin: '0 auto', background: '#111520', borderRadius: '24px 24px 0 0', padding: '28px 22px', paddingBottom: 'max(env(safe-area-inset-bottom),28px)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
+            <div style={{ fontFamily: "'Bebas Neue',sans-serif", fontSize: 26, color: '#fff', letterSpacing: 1 }}>☁️ CLOUD ACCOUNT</div>
+            <button onClick={() => setShowAuth(false)} style={{ width: 32, height: 32, borderRadius: '50%', border: '1px solid rgba(255,255,255,0.1)', background: 'rgba(255,255,255,0.05)', color: '#aaa', cursor: 'pointer', fontSize: 16 }}>✕</button>
+          </div>
+
+          {/* Tab switcher */}
+          <div style={{ display: 'flex', background: 'rgba(255,255,255,0.04)', borderRadius: 12, padding: 4, marginBottom: 22 }}>
+            {[['signin','SIGN IN'],['signup','CREATE ACCOUNT']].map(([m, label]) => (
+              <button key={m} onClick={() => setAuthMode(m)} style={{ flex: 1, padding: '10px 8px', borderRadius: 9, border: 'none', background: authMode === m ? '#4A9EFF' : 'transparent', color: authMode === m ? '#000' : '#666', fontFamily: "'Oswald',sans-serif", fontSize: 13, fontWeight: 700, cursor: 'pointer', letterSpacing: 0.5, transition: 'all 0.15s' }}>{label}</button>
+            ))}
+          </div>
+
+          <input type="email" value={authEmail} onChange={e => setAuthEmail(e.target.value)} placeholder="Email address" style={inp} autoCapitalize="off" />
+          <input type="password" value={authPassword} onChange={e => setAuthPassword(e.target.value)} placeholder="Password" style={{ ...inp, marginBottom: 18 }} onKeyDown={e => e.key === 'Enter' && (authMode === 'signin' ? handleSignIn() : handleSignUp())} />
+
+          <button onClick={() => authMode === 'signin' ? handleSignIn() : handleSignUp()} disabled={authLoading || !authEmail || !authPassword} style={{ width: '100%', padding: 15, borderRadius: 14, border: 'none', background: authLoading ? '#333' : '#4A9EFF', color: '#000', fontFamily: "'Oswald',sans-serif", fontSize: 18, fontWeight: 700, cursor: authLoading ? 'default' : 'pointer', letterSpacing: 0.5, marginBottom: 12 }}>
+            {authLoading ? '…' : authMode === 'signin' ? 'SIGN IN' : 'CREATE ACCOUNT'}
+          </button>
+
+          <button onClick={handleGoogleAuth} style={{ width: '100%', padding: 14, borderRadius: 14, border: '1px solid rgba(255,255,255,0.12)', background: 'rgba(255,255,255,0.04)', color: '#fff', fontFamily: "'Oswald',sans-serif", fontSize: 16, fontWeight: 700, cursor: 'pointer', letterSpacing: 0.5, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10 }}>
+            <span style={{ fontSize: 18 }}>G</span> CONTINUE WITH GOOGLE
+          </button>
+
+          <div style={{ fontSize: 11, color: '#3a5a6a', textAlign: 'center', marginTop: 16, lineHeight: 1.5 }}>
+            Your data is end-to-end encrypted · Backed up automatically on sign-in
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  /* ── DAILY CHECK-IN MODAL ── */
+  function DailyCheckInModal() {
+    const SliderRow = ({ label, value, set, min=1, max=10, color='#4BDE80' }) => (
+      <div style={{ marginBottom: 16 }}>
+        <div style={{ display:'flex', justifyContent:'space-between', marginBottom:6 }}>
+          <span style={{ fontSize:13, color:'#ccc' }}>{label}</span>
+          <span style={{ fontSize:15, fontWeight:700, color }}>{value}<span style={{ fontSize:10, color:'#555' }}>/10</span></span>
+        </div>
+        <input type="range" min={min} max={max} value={value}
+          onChange={e => set(Number(e.target.value))}
+          style={{ width:'100%', accentColor: color, cursor:'pointer' }} />
+        <div style={{ display:'flex', justifyContent:'space-between', fontSize:9, color:'#444', marginTop:2 }}>
+          <span>{min === 1 ? 'Low' : '1'}</span><span>10</span>
+        </div>
+      </div>
+    );
+    return (
+      <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.85)', zIndex:990, display:'flex', alignItems:'flex-end', justifyContent:'center' }}
+        onClick={e => { if (e.target === e.currentTarget) setShowCheckIn(false); }}>
+        <div style={{ width:'100%', maxWidth:500, background:'#111827', borderRadius:'24px 24px 0 0', padding:'24px 20px 36px', maxHeight:'88vh', overflowY:'auto' }}>
+          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:20 }}>
+            <div>
+              <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:24, color:'#fff', letterSpacing:1 }}>DAILY CHECK-IN</div>
+              <div style={{ fontSize:11, color:'#4a6a7a', letterSpacing:1 }}>{new Date().toLocaleDateString('en-US',{weekday:'long',month:'short',day:'numeric'}).toUpperCase()} · +10 XP</div>
+            </div>
+            <button onClick={() => setShowCheckIn(false)} style={{ background:'none', border:'none', color:'#555', fontSize:20, cursor:'pointer', padding:4 }}>✕</button>
+          </div>
+
+          {/* Weight (optional) */}
+          <div style={{ marginBottom:16 }}>
+            <div style={{ fontSize:13, color:'#ccc', marginBottom:6 }}>Weight today <span style={{ color:'#555', fontSize:11 }}>(optional)</span></div>
+            <input type="number" value={ciWeight} onChange={e => setCiWeight(e.target.value)}
+              placeholder={userWeight ? `Last: ${userWeight} lbs` : 'lbs'}
+              style={{ width:'100%', padding:'11px 14px', borderRadius:12, border:'1px solid rgba(255,255,255,0.1)', background:'rgba(255,255,255,0.05)', color:'#fff', fontSize:14, fontFamily:'inherit', outline:'none' }} />
+          </div>
+
+          <SliderRow label="⚡ Energy level" value={ciEnergy} set={setCiEnergy} color={accentColor} />
+          <SliderRow label="🍽️ Hunger level" value={ciHunger} set={setCiHunger} color="#F5C842" />
+          <SliderRow label="🥗 Diet adherence" value={ciDietScore} set={setCiDietScore} color="#4A9EFF" />
+
+          {/* Workout done toggle */}
+          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:20, padding:'12px 14px', borderRadius:14, border:`1px solid ${ciWorkoutDone ? accentColor+'40' : 'rgba(255,255,255,0.08)'}`, background: ciWorkoutDone ? `${accentColor}12` : 'rgba(255,255,255,0.02)', cursor:'pointer' }}
+            onClick={() => setCiWorkoutDone(v => !v)}>
+            <span style={{ fontSize:13, color: ciWorkoutDone ? accentColor : '#aaa' }}>💪 Workout completed today</span>
+            <div style={{ width:44, height:26, borderRadius:13, background: ciWorkoutDone ? accentColor : 'rgba(255,255,255,0.1)', position:'relative', transition:'background 0.2s', flexShrink:0 }}>
+              <div style={{ position:'absolute', top:3, left: ciWorkoutDone ? 20 : 3, width:20, height:20, borderRadius:'50%', background:'#fff', transition:'left 0.2s', boxShadow:'0 1px 4px rgba(0,0,0,0.4)' }} />
+            </div>
+          </div>
+
+          {/* Notes */}
+          <div style={{ marginBottom:20 }}>
+            <div style={{ fontSize:13, color:'#ccc', marginBottom:6 }}>Notes <span style={{ color:'#555', fontSize:11 }}>(optional)</span></div>
+            <textarea value={ciNotes} onChange={e => setCiNotes(e.target.value)}
+              placeholder="How are you feeling? Any wins or struggles?"
+              rows={2}
+              style={{ width:'100%', padding:'11px 14px', borderRadius:12, border:'1px solid rgba(255,255,255,0.1)', background:'rgba(255,255,255,0.05)', color:'#fff', fontSize:13, fontFamily:'inherit', outline:'none', resize:'none' }} />
+          </div>
+
+          <button onClick={saveDailyCheckIn}
+            style={{ width:'100%', padding:15, borderRadius:16, border:'none', background:accentColor, color:'#000', fontFamily:"'Oswald',sans-serif", fontSize:16, fontWeight:700, cursor:'pointer', letterSpacing:1 }}>
+            ✓ SAVE CHECK-IN · +10 XP
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   /* ── NAV + MAIN RENDER ── */
   const NAV = [
     { id: 'home',    icon: '🏠',  label: 'Home'    },
@@ -3273,7 +4373,8 @@ After searching, reply with ONLY a valid JSON array, no markdown:
 
       {badge && (
         <div className="pop" style={{ position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', padding: '28px 32px', borderRadius: 24, background: 'rgba(10,10,20,0.98)', border: `2px solid ${badge.color || accentColor}`, zIndex: 800, textAlign: 'center', boxShadow: '0 8px 60px rgba(0,0,0,0.8)', maxWidth: '85vw' }}>
-          <div style={{ fontSize: 44, marginBottom: 10 }}>🏆</div>
+          <div style={{ fontSize: 44, marginBottom: 6 }}>{badge.emoji || '🏆'}</div>
+          <div style={{ fontSize: 10, color: badge.color || accentColor, letterSpacing: 2, fontWeight: 700, marginBottom: 6 }}>BADGE UNLOCKED</div>
           <div style={{ fontFamily: "'Bebas Neue',sans-serif", fontSize: 24, color: badge.color || accentColor, letterSpacing: 1, marginBottom: 5 }}>{badge.msg}</div>
           {badge.sub && <div style={{ fontSize: 12, color: '#aaa' }}>{badge.sub}</div>}
         </div>
@@ -3281,6 +4382,8 @@ After searching, reply with ONLY a valid JSON array, no markdown:
 
       {showBarcode && <BarcodeScanner onScan={handleBarcodeScan} onClose={() => setShowBarcode(false)} />}
       {showSettings && SettingsModal()}
+      {showAuth && <AuthModal />}
+      {showCheckIn && <DailyCheckInModal />}
 
       {/* ── PENDING CHALLENGE MODAL ── */}
       {pendingChallenge && (
@@ -3312,8 +4415,10 @@ After searching, reply with ONLY a valid JSON array, no markdown:
                 DECLINE
               </button>
               <button onClick={() => {
-                const accepted = { ...pendingChallenge, startDate: new Date().toISOString().split('T')[0], createdAt: Date.now(), isOwn: false, id: 'ch_' + Date.now() };
-                setMyChallenges(p => [...p, accepted]);
+                const accepted = { ...pendingChallenge, startDate: pendingChallenge.startDate || todayStr(), createdAt: Date.now(), isOwn: false };
+                // Keep original ID so everyone shares the same leaderboard on Gun
+                setMyChallenges(p => [...p.filter(c => c.id !== accepted.id), accepted]);
+                gunSyncProgress(accepted); // push my progress immediately
                 setPendingChallenge(null);
                 setScreen('challenges');
                 showToast(`Challenge accepted! Let's go 🔥`, 'success');
@@ -3330,7 +4435,7 @@ After searching, reply with ONLY a valid JSON array, no markdown:
 
 /* ── SERVICE WORKER ── */
 if ('serviceWorker' in navigator) {
-  const sw = `const C='drews-hub-v13';self.addEventListener('install',e=>{e.waitUntil(caches.open(C).then(c=>c.addAll(['.'])));self.skipWaiting();});self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==C).map(k=>caches.delete(k)))));self.clients.claim();});self.addEventListener('fetch',e=>{if(e.request.method!=='GET')return;const u=e.request.url;if(u.includes('api.anthropic.com')||u.includes('openfoodfacts')||u.includes('themealdb')||u.includes('fonts.googleapis')||u.includes('cdnjs'))return;e.respondWith(caches.match(e.request).then(r=>r||fetch(e.request).then(res=>{if(res&&res.ok){const cl=res.clone();caches.open(C).then(c=>c.put(e.request,cl));}return res;})));});`;
+  const sw = `const C='drews-hub-v20';self.addEventListener('install',e=>{e.waitUntil(caches.open(C).then(c=>c.addAll(['.'])));self.skipWaiting();});self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==C).map(k=>caches.delete(k)))));self.clients.claim();});self.addEventListener('fetch',e=>{if(e.request.method!=='GET')return;const u=e.request.url;if(u.includes('api.anthropic.com')||u.includes('openfoodfacts')||u.includes('themealdb')||u.includes('fonts.googleapis')||u.includes('cdnjs')||u.includes('supabase.co'))return;e.respondWith(caches.match(e.request).then(r=>r||fetch(e.request).then(res=>{if(res&&res.ok){const cl=res.clone();caches.open(C).then(c=>c.put(e.request,cl));}return res;})));});`;
   try { navigator.serviceWorker.register(URL.createObjectURL(new Blob([sw], { type: 'application/javascript' }))).catch(() => {}); } catch {}
 }
 
