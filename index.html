@@ -1914,8 +1914,8 @@ Write a 4-sentence weekly review: 1) What went well (cite a specific number), 2)
         // Fall through to direct key if edge function unavailable
       }
     }
-    // 2️⃣ Fallback: user's own key
-    if (!apiKey) { showToast('AI unavailable — sign in or add API key in Settings ⚙️', 'error'); return null; }
+    // 2️⃣ Fallback: user's own key (hidden from UI — dev-only path)
+    if (!apiKey) { showToast('Sign in for AI features — tap Me → Sign In (free)', 'info'); return null; }
     try {
       const headers = { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' };
       if (extra.beta) headers['anthropic-beta'] = extra.beta;
@@ -1993,8 +1993,8 @@ Write a 4-sentence weekly review: 1) What went well (cite a specific number), 2)
     let pro  = parseFloat(logPro)  || 0;
     let carb = parseFloat(logCarb) || 0;
     let fat  = parseFloat(logFat)  || 0;
-    /* auto-lookup macros if all fields are empty and API key is set */
-    if (cal === 0 && pro === 0 && fat === 0 && apiKey) {
+    /* auto-lookup macros if all fields are empty (Edge Function handles AI call) */
+    if (cal === 0 && pro === 0 && fat === 0 && (_sb || apiKey)) {
       setLookingUpFood(true);
       const n = await fetchFoodNutrition(logItem.trim());
       setLookingUpFood(false);
@@ -4400,16 +4400,14 @@ Write a 4-sentence weekly review: 1) What went well (cite a specific number), 2)
               {/* AI Route status */}
               <div style={{ padding:'10px 12px', borderRadius:12, border:`1px solid ${_sb ? accentColor+'40' : 'rgba(255,165,0,0.4)'}`, background: _sb ? `${accentColor}0a` : 'rgba(255,165,0,0.08)', marginBottom:12 }}>
                 <div style={{ fontSize:11, fontWeight:700, color: _sb ? accentColor : '#F59E0B', marginBottom:3 }}>
-                  {_sb ? '✅ AI ROUTED VIA EDGE FUNCTION' : '⚠️ EDGE FUNCTION NOT CONNECTED'}
+                  {_sb ? '✅ AI POWERED BY LEVEL CLOUD' : '⚠️ SIGN IN TO UNLOCK AI FEATURES'}
                 </div>
                 <div style={{ fontSize:10, color:'#555', lineHeight:1.5 }}>
                   {_sb
-                    ? 'AI calls run server-side — no personal key needed. Add your Anthropic key as ANTHROPIC_KEY in Supabase Edge Function Secrets to enable.'
-                    : 'Sign in above to use server-side AI. Or enter your Claude API key below as a fallback.'}
+                    ? 'All AI features run on LEVEL\'s servers — nothing to configure. Free tier: 15 AI uses per day.'
+                    : 'Sign in above to enable LEVEL AI, meal planning, food lookup, coaching, and more. Free — no credit card.'}
                 </div>
               </div>
-              <div style={{ fontSize: 10, color: '#4a6a7a', letterSpacing: 1, marginBottom: 8 }}>CLAUDE API KEY <span style={{ color:'#555' }}>(fallback if not signed in)</span></div>
-              <input type="password" value={sKey2} onChange={e => setSKey2(e.target.value)} placeholder="sk-ant-… (paste here to also use as Supabase ANTHROPIC_KEY secret)" style={inp} />
 
               <div style={{ fontSize: 10, color: '#4a6a7a', letterSpacing: 1, marginBottom: 8, marginTop: 4 }}>VERCEL URL (TikTok / Instagram import)</div>
               <input value={sUrl2} onChange={e => setSUrl2(e.target.value)} placeholder="https://your-app.vercel.app" style={inp} />
@@ -4532,9 +4530,15 @@ Write a 4-sentence weekly review: 1) What went well (cite a specific number), 2)
           </div>
 
           <div style={{ marginBottom: 20 }}>
-            <div style={{ fontSize: 10, color: '#4a6a7a', letterSpacing: 1, marginBottom: 8 }}>CLAUDE API KEY</div>
-            <input type="password" value={sKey} onChange={e => setSKey(e.target.value)} placeholder="sk-ant-…" style={inp} />
-            <div style={{ fontSize: 10, color: '#4a6a7a', letterSpacing: 1, marginBottom: 8, marginTop: 4 }}>VERCEL URL (TikTok / Instagram import)</div>
+            <div style={{ padding:'10px 12px', borderRadius:12, border:`1px solid ${_sb ? accentColor+'40' : 'rgba(255,165,0,0.4)'}`, background: _sb ? `${accentColor}0a` : 'rgba(255,165,0,0.08)' }}>
+              <div style={{ fontSize:11, fontWeight:700, color: _sb ? accentColor : '#F59E0B', marginBottom:3 }}>
+                {_sb ? '✅ AI POWERED BY LEVEL CLOUD' : '⚠️ SIGN IN TO UNLOCK AI'}
+              </div>
+              <div style={{ fontSize:10, color:'#555', lineHeight:1.5 }}>
+                {_sb ? 'All AI runs server-side. Free — 15 uses/day. No keys needed.' : 'Sign in for free AI features — no credit card, no API key required.'}
+              </div>
+            </div>
+            <div style={{ fontSize: 10, color: '#4a6a7a', letterSpacing: 1, marginBottom: 8, marginTop: 12 }}>VERCEL URL (TikTok / Instagram import)</div>
             <input value={sUrl} onChange={e => setSUrl(e.target.value)} placeholder="https://your-app.vercel.app" style={inp} />
           </div>
 
@@ -4594,7 +4598,7 @@ Write a 4-sentence weekly review: 1) What went well (cite a specific number), 2)
             📱 COPY SYNC LINK (FOR OTHER DEVICES)
           </button>
           <div style={{ fontSize: 11, color: '#555', textAlign: 'center', marginTop: 6 }}>
-            Opens your app pre-loaded with API key & settings on any device
+            Opens your app pre-loaded with your settings on any device
           </div>
         </div>
       </div>
@@ -4837,7 +4841,7 @@ Write a 4-sentence weekly review: 1) What went well (cite a specific number), 2)
 
 /* ── SERVICE WORKER ── */
 if ('serviceWorker' in navigator) {
-  const sw = `const C='drews-hub-v21';self.addEventListener('install',e=>{e.waitUntil(caches.open(C).then(c=>c.addAll(['.'])));self.skipWaiting();});self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==C).map(k=>caches.delete(k)))));self.clients.claim();});self.addEventListener('fetch',e=>{if(e.request.method!=='GET')return;const u=e.request.url;if(u.includes('api.anthropic.com')||u.includes('openfoodfacts')||u.includes('themealdb')||u.includes('fonts.googleapis')||u.includes('cdnjs')||u.includes('supabase.co'))return;e.respondWith(caches.match(e.request).then(r=>r||fetch(e.request).then(res=>{if(res&&res.ok){const cl=res.clone();caches.open(C).then(c=>c.put(e.request,cl));}return res;})));});`;
+  const sw = `const C='drews-hub-v22';self.addEventListener('install',e=>{e.waitUntil(caches.open(C).then(c=>c.addAll(['.'])));self.skipWaiting();});self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==C).map(k=>caches.delete(k)))));self.clients.claim();});self.addEventListener('fetch',e=>{if(e.request.method!=='GET')return;const u=e.request.url;if(u.includes('api.anthropic.com')||u.includes('openfoodfacts')||u.includes('themealdb')||u.includes('fonts.googleapis')||u.includes('cdnjs')||u.includes('supabase.co'))return;e.respondWith(caches.match(e.request).then(r=>r||fetch(e.request).then(res=>{if(res&&res.ok){const cl=res.clone();caches.open(C).then(c=>c.put(e.request,cl));}return res;})));});`;
   try { navigator.serviceWorker.register(URL.createObjectURL(new Blob([sw], { type: 'application/javascript' }))).catch(() => {}); } catch {}
 }
 
