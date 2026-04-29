@@ -1019,6 +1019,20 @@ function FitnessHub() {
   const [rbSuggesting, setRbSuggesting] = useState(false);
   const [rbGenerating, setRbGenerating] = useState(false);
 
+  /* ── Beta welcome + Feedback ── */
+  const [showBetaModal, setShowBetaModal] = useState(() => !load('betaSeen', false));
+  const [feedbackOpen,  setFeedbackOpen]  = useState(false);
+  const [fbRating,      setFbRating]      = useState(5);
+  const [fbType,        setFbType]        = useState('general');
+  const [fbMsg,         setFbMsg]         = useState('');
+  const [fbSubmitting,  setFbSubmitting]  = useState(false);
+  const [fbDone,        setFbDone]        = useState(false);
+
+  /* ── LEVEL Memory — learns users over time ── */
+  const [userMemory, setUserMemory] = useState(() => load('userMemory', {
+    struggles: [], wins: [], conversationCount: 0, lastTopics: [], dietNotes: [], personalityNotes: []
+  }));
+
   /* ── settings modal staging (synced from real state when modal opens) ── */
   const [sKey,       setSKey]       = useState('');
   const [sUrl,       setSUrl]       = useState('');
@@ -1062,6 +1076,7 @@ function FitnessHub() {
   useEffect(() => save('pantry',           pantry),           [pantry]);
   useEffect(() => save('levelMsgs',        levelMsgs),        [levelMsgs]);
   useEffect(() => save('customRoutines',   customRoutines),   [customRoutines]);
+  useEffect(() => save('userMemory',       userMemory),       [userMemory]);
   useEffect(() => { if (screen === 'level') levelChatEndRef.current?.scrollIntoView({ behavior:'smooth' }); }, [levelMsgs, levelTyping, screen]);
 
   /* ── Global persistence: force-save critical state on hide/unload ── */
@@ -1075,6 +1090,7 @@ function FitnessHub() {
         save('userXP',        userXP);
         save('levelMsgs',     levelMsgs);
         save('customRoutines',customRoutines);
+        save('userMemory',    userMemory);
         const today = todayStr();
         const todayEntries = load('entries_' + today, []);
         if (todayEntries.length > 0) save('entries_' + today, todayEntries);
@@ -1088,7 +1104,7 @@ function FitnessHub() {
       document.removeEventListener('visibilitychange', onVis);
       window.removeEventListener('beforeunload', forceSave);
     };
-  }, [vault, shopList, checkIns, mealPlan, userXP, levelMsgs, customRoutines]);
+  }, [vault, shopList, checkIns, mealPlan, userXP, levelMsgs, customRoutines, userMemory]);
   /* sync settings staging state whenever the modal opens */
   useEffect(() => {
     if (showSettings) { setSKey(apiKey); setSUrl(vercelUrl); setSBudget(String(weekBudget)); setSVaultName(vaultName); }
@@ -1743,6 +1759,10 @@ Write a 4-sentence weekly review: 1) What went well (cite a specific number), 2)
       hasCustomRoutines: customRoutines.length > 0,
       customRoutineCount: customRoutines.length,
       customRoutineNames: customRoutines.map(r => r.name),
+      memoryStruggles: (userMemory.struggles||[]).slice(-3).map(s=>s.note),
+      memoryWins: (userMemory.wins||[]).slice(-3).map(w=>w.note),
+      conversationCount: userMemory.conversationCount||0,
+      memoryDietNotes: (userMemory.dietNotes||[]).slice(-2),
     };
   }
 
@@ -2022,17 +2042,182 @@ Write a 4-sentence weekly review: 1) What went well (cite a specific number), 2)
       const needsAI  = ['general','recovery','adjust','progress'].includes(intent) || msg.split(' ').length > 6;
       if (needsAI) {
         try {
-          const stateSnap = `Goal:${state.goalLabel} | Cal:${state.totalCal}/${state.goalCal} | Pro:${state.totalPro}/${state.goalProtein}g | Streak:${state.streak} | Workouts/wk:${state.workoutsWk} | Energy:${state.energyLevel??'?'}/10 | Weight trend:${state.weightTrend ? (state.weightTrend.delta>0?'+':'')+state.weightTrend.delta+'lbs/'+state.weightTrend.days+'d' : 'N/A'}`;
-          const ai = await callClaude([{ role:'user', content:`You are LEVEL, a sharp no-nonsense AI fitness coach. User message: "${msg}"\nUser data: ${stateSnap}\nDecision engine already produced: "${decision.decision}"\nAdd 1-2 sentences of direct, personalized coaching — no fluff, no repeating the data above.` }], 150);
+          const memCtx = [
+            ...(state.memoryStruggles||[]).map(s=>`Known struggle: ${s}`),
+            ...(state.memoryWins||[]).map(w=>`Recent win: ${w}`),
+            ...(state.memoryDietNotes||[]).map(d=>`Diet note: ${d}`),
+          ].join(' | ');
+          const stateSnap = `Goal:${state.goalLabel} | Cal:${state.totalCal}/${state.goalCal} | Pro:${state.totalPro}/${state.goalProtein}g | Streak:${state.streak} | Workouts/wk:${state.workoutsWk} | Energy:${state.energyLevel??'?'}/10 | Weight:${state.weightTrend?(state.weightTrend.delta>0?'+':'')+state.weightTrend.delta+'lbs/'+state.weightTrend.days+'d':'N/A'}${memCtx?' | '+memCtx:''}`;
+          const ai = await callClaude([{ role:'user', content:`You are LEVEL, a sharp no-nonsense AI fitness coach who remembers this user's history.\nUser: "${msg}"\nData: ${stateSnap}\nEngine decision: "${decision.decision}"\nConversation #${(state.conversationCount||0)+1} with this user.\nAdd 1-2 sentences of direct, personalized coaching. Reference their history if relevant. No fluff, no repeating data.` }], 180);
           if (ai?.trim()) response += `\n\n💬 ${ai.trim()}`;
         } catch(e) { /* AI is optional — never break the response */ }
       }
+      updateUserMemory(msg, intent);
       setLevelMsgs(p => [...p, { role:'level', text:response, ts:Date.now(), cta: decision.cta||null, groceryAdditions: decision.groceryAdditions||null, scaledRecipeName: decision.scaledRecipeName||null }]);
     } catch(e) {
       setLevelMsgs(p => [...p, { role:'level', text:`System error. Check your data and try again.`, ts:Date.now() }]);
     } finally {
       setLevelTyping(false);
     }
+  }
+
+  /* ── LEVEL Memory updater ── */
+  function updateUserMemory(msg, intent) {
+    setUserMemory(prev => {
+      const updated = {
+        ...prev,
+        conversationCount: (prev.conversationCount||0) + 1,
+        lastTopics: [...(prev.lastTopics||[]), intent].slice(-15),
+      };
+      const m = msg.toLowerCase();
+      // Track struggles
+      if (['struggling','can\'t','hard','difficult','trouble','stuck','plateau','tired','sore','skipped'].some(k=>m.includes(k))) {
+        updated.struggles = [...(prev.struggles||[]), { date: todayStr(), note: msg.substring(0,120) }].slice(-20);
+      }
+      // Track wins
+      if (intent === 'postWorkout' || ['hit','crushed','pr','personal record','finished','completed','nailed'].some(k=>m.includes(k))) {
+        updated.wins = [...(prev.wins||[]), { date: todayStr(), note: msg.substring(0,120) }].slice(-20);
+      }
+      // Diet notes
+      if (intent === 'meal' || intent === 'snack' || intent === 'ingredientCook') {
+        const note = msg.substring(0,80);
+        if (!prev.dietNotes?.includes(note)) {
+          updated.dietNotes = [...(prev.dietNotes||[]), note].slice(-15);
+        }
+      }
+      return updated;
+    });
+  }
+
+  /* ── Feedback submission ── */
+  async function submitFeedback() {
+    if (!fbMsg.trim()) { showToast('Please write something first', 'error'); return; }
+    setFbSubmitting(true);
+    try {
+      const entry = {
+        version: 'v28', rating: fbRating, type: fbType,
+        message: fbMsg.trim(),
+        user_name: userName || 'anonymous',
+        user_goal: userGoal || '',
+        user_agent: navigator.userAgent.substring(0,200),
+      };
+      // Local backup always
+      const log = load('feedbackLog', []);
+      save('feedbackLog', [...log, { ...entry, timestamp: new Date().toISOString() }]);
+      // Supabase (best-effort)
+      if (_sb) {
+        try {
+          const { data: { user } } = await _sb.auth.getUser();
+          await _sb.from('feedback').insert({ ...entry, user_id: user?.id || null });
+        } catch(e) { console.warn('Feedback upload failed (saved locally)', e); }
+      }
+      addXP(15);
+      setFbDone(true);
+      showToast('Thanks for the feedback! 🙏 +15 XP', 'success');
+    } catch(e) { showToast('Something went wrong, try again', 'error'); }
+    setFbSubmitting(false);
+  }
+
+  /* ── Export all feedback to Obsidian ── */
+  function exportFeedbackToObsidian() {
+    const log = load('feedbackLog', []);
+    if (!log.length) { showToast('No feedback collected yet', 'info'); return; }
+    const byType = { bug: log.filter(f=>f.type==='bug'), idea: log.filter(f=>f.type==='idea'), general: log.filter(f=>f.type==='general') };
+    const avgRating = (log.reduce((s,f)=>s+(f.rating||0),0)/log.length).toFixed(1);
+    const content = `# 📊 Level Up Fitness — User Feedback\n\nExported: ${new Date().toLocaleDateString()}\nTotal: ${log.length} submissions | Avg Rating: ⭐${avgRating}/5\n🐛 Bugs: ${byType.bug.length} | 💡 Ideas: ${byType.idea.length} | 💬 General: ${byType.general.length}\n\n---\n\n${['bug','idea','general'].flatMap(t=>byType[t].length ? [`## ${t==='bug'?'🐛 Bug Reports':t==='idea'?'💡 Feature Ideas':'💬 General Feedback'}\n`,...byType[t].map(f=>`### ${(f.timestamp||'').split('T')[0]} — ⭐${f.rating}/5 (${f.user_name})\n${f.message}\n`)] : []).join('\n---\n\n')}`;
+    const vn = vaultName?.trim();
+    const uri = `obsidian://new?${vn?`vault=${encodeURIComponent(vn)}&`:''}name=${encodeURIComponent('Level Up — User Feedback')}&content=${encodeURIComponent(content)}`;
+    window.location.href = uri;
+    showToast('Opening Obsidian…', 'info');
+  }
+
+  /* ── Beta Welcome Modal ── */
+  function BetaWelcomeModal() {
+    const ac = accentColor;
+    return React.createElement('div', { style:{position:'fixed',inset:0,background:'rgba(0,0,0,0.85)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:9999,padding:20} },
+      React.createElement('div', { style:{background:'#13131f',borderRadius:20,padding:28,maxWidth:380,width:'100%',border:`1px solid ${ac}40`,boxShadow:`0 0 60px ${ac}20`} },
+        React.createElement('div', { style:{textAlign:'center',marginBottom:20} },
+          React.createElement('div', { style:{fontSize:44,marginBottom:8} }, '🧠'),
+          React.createElement('div', { style:{fontFamily:"'Bebas Neue',sans-serif",fontSize:28,color:'#fff',letterSpacing:2} }, 'LEVEL UP FITNESS'),
+          React.createElement('div', { style:{fontSize:11,color:ac,letterSpacing:3,marginTop:4} }, 'BETA — EARLY ACCESS'),
+        ),
+        React.createElement('div', { style:{background:`${ac}12`,border:`1px solid ${ac}30`,borderRadius:12,padding:14,marginBottom:20} },
+          React.createElement('p', { style:{fontSize:13,color:'#ccc',lineHeight:1.6,margin:0} },
+            "You're one of the first people to try this. The app is still being built — your feedback shapes what gets built next. Takes 30 seconds."
+          )
+        ),
+        // Star rating
+        React.createElement('div', { style:{marginBottom:14} },
+          React.createElement('div', { style:{fontSize:11,color:'#4a6a7a',letterSpacing:1,marginBottom:8} }, 'FIRST IMPRESSION (1–5 STARS)'),
+          React.createElement('div', { style:{display:'flex',gap:8,justifyContent:'center'} },
+            [1,2,3,4,5].map(n => React.createElement('button', {
+              key:n, onClick:()=>setFbRating(n),
+              style:{fontSize:28,background:'none',border:'none',cursor:'pointer',opacity:n<=fbRating?1:0.3,transition:'opacity 0.15s'}
+            }, '⭐'))
+          )
+        ),
+        // Type
+        React.createElement('div', { style:{display:'flex',gap:6,marginBottom:14} },
+          ['general','bug','idea'].map(t => React.createElement('button', {
+            key:t, onClick:()=>setFbType(t),
+            style:{flex:1,padding:'8px 4px',borderRadius:10,border:`1px solid ${fbType===t?ac:'rgba(255,255,255,0.1)'}`,background:fbType===t?`${ac}22`:'transparent',color:fbType===t?ac:'#888',fontSize:11,fontWeight:700,cursor:'pointer',fontFamily:'inherit',letterSpacing:0.5}
+          }, t==='bug'?'🐛 BUG':t==='idea'?'💡 IDEA':'💬 GENERAL'))
+        ),
+        // Message
+        React.createElement('textarea', {
+          value: fbMsg, onChange: e=>setFbMsg(e.target.value),
+          placeholder: fbType==='bug'?"What broke or confused you?"
+                      :fbType==='idea'?"What feature would you add?"
+                      :"What do you think so far?",
+          rows:3,
+          style:{width:'100%',background:'rgba(255,255,255,0.05)',border:'1px solid rgba(255,255,255,0.12)',borderRadius:12,padding:12,color:'#fff',fontSize:13,fontFamily:'inherit',resize:'none',outline:'none',boxSizing:'border-box',marginBottom:14}
+        }),
+        fbDone
+          ? React.createElement('div', { style:{textAlign:'center',padding:16} },
+              React.createElement('div', { style:{fontSize:32,marginBottom:8} }, '🙏'),
+              React.createElement('div', { style:{color:ac,fontWeight:700,fontSize:15} }, 'Thank you! +15 XP'),
+              React.createElement('button', { onClick:()=>{ setShowBetaModal(false); save('betaSeen',true); setFbDone(false); }, style:{marginTop:14,padding:'10px 28px',borderRadius:30,background:ac,border:'none',color:'#000',fontWeight:700,fontSize:14,cursor:'pointer',fontFamily:'inherit'} }, "LET'S GO →")
+            )
+          : React.createElement('div', { style:{display:'flex',flexDirection:'column',gap:10} },
+              React.createElement('button', {
+                onClick: submitFeedback, disabled: fbSubmitting,
+                style:{padding:14,borderRadius:14,background:`linear-gradient(135deg,${ac},#a855f7)`,border:'none',color:'#fff',fontFamily:"'Oswald',sans-serif",fontSize:16,fontWeight:700,cursor:'pointer',letterSpacing:1}
+              }, fbSubmitting ? 'SENDING…' : '🚀 SUBMIT FEEDBACK'),
+              React.createElement('button', { onClick:()=>{ setShowBetaModal(false); save('betaSeen',true); }, style:{background:'none',border:'none',color:'#4a6a7a',fontSize:12,cursor:'pointer',padding:4} }, "Skip for now — I'll give feedback later")
+            )
+      )
+    );
+  }
+
+  /* ── Feedback Modal (floating button → full form) ── */
+  function FeedbackModal() {
+    const ac = accentColor;
+    return React.createElement('div', { style:{position:'fixed',inset:0,background:'rgba(0,0,0,0.8)',display:'flex',alignItems:'flex-end',justifyContent:'center',zIndex:9998,padding:'0 0 20px'} },
+      React.createElement('div', { style:{background:'#13131f',borderRadius:20,padding:24,maxWidth:420,width:'calc(100% - 32px)',border:`1px solid ${ac}40`} },
+        React.createElement('div', { style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:18} },
+          React.createElement('div', { style:{fontFamily:"'Oswald',sans-serif",fontSize:18,fontWeight:700,color:'#fff'} }, '📬 SEND FEEDBACK'),
+          React.createElement('button', { onClick:()=>{ setFeedbackOpen(false); setFbDone(false); setFbMsg(''); }, style:{background:'none',border:'none',color:'#555',fontSize:20,cursor:'pointer'} }, '✕')
+        ),
+        // Stars
+        React.createElement('div', { style:{display:'flex',gap:6,marginBottom:14} },
+          [1,2,3,4,5].map(n => React.createElement('button',{key:n,onClick:()=>setFbRating(n),style:{fontSize:24,background:'none',border:'none',cursor:'pointer',opacity:n<=fbRating?1:0.3}},'⭐'))
+        ),
+        // Type chips
+        React.createElement('div', { style:{display:'flex',gap:6,marginBottom:14} },
+          ['general','bug','idea'].map(t=>React.createElement('button',{key:t,onClick:()=>setFbType(t),style:{flex:1,padding:'8px 4px',borderRadius:10,border:`1px solid ${fbType===t?ac:'rgba(255,255,255,0.1)'}`,background:fbType===t?`${ac}22`:'transparent',color:fbType===t?ac:'#888',fontSize:11,fontWeight:700,cursor:'pointer',fontFamily:'inherit'}}
+            ,t==='bug'?'🐛 BUG':t==='idea'?'💡 IDEA':'💬 GENERAL'))
+        ),
+        React.createElement('textarea',{value:fbMsg,onChange:e=>setFbMsg(e.target.value),placeholder:fbType==='bug'?"Describe the bug…":fbType==='idea'?"Describe your idea…":"What's on your mind?",rows:4,style:{width:'100%',background:'rgba(255,255,255,0.05)',border:'1px solid rgba(255,255,255,0.12)',borderRadius:12,padding:12,color:'#fff',fontSize:13,fontFamily:'inherit',resize:'none',outline:'none',boxSizing:'border-box',marginBottom:14}}),
+        fbDone
+          ? React.createElement('div',{style:{textAlign:'center',padding:12}},
+              React.createElement('div',{style:{fontSize:32}},'🙏'),
+              React.createElement('div',{style:{color:ac,fontWeight:700,marginTop:6}},'Feedback received! +15 XP'),
+              React.createElement('button',{onClick:()=>{setFeedbackOpen(false);setFbDone(false);setFbMsg('');},style:{marginTop:12,padding:'10px 24px',borderRadius:30,background:ac,border:'none',color:'#000',fontWeight:700,cursor:'pointer',fontFamily:'inherit'}},'CLOSE')
+            )
+          : React.createElement('button',{onClick:submitFeedback,disabled:fbSubmitting,style:{width:'100%',padding:14,borderRadius:14,background:`linear-gradient(135deg,${ac},#a855f7)`,border:'none',color:'#fff',fontFamily:"'Oswald',sans-serif",fontSize:15,fontWeight:700,cursor:'pointer'}}
+            ,fbSubmitting?'SENDING…':'🚀 SUBMIT FEEDBACK')
+      )
+    );
   }
 
   /* ── LEVEL SCREEN ── */
@@ -4921,6 +5106,11 @@ Write a 4-sentence weekly review: 1) What went well (cite a specific number), 2)
                 📱 COPY SYNC LINK (FOR OTHER DEVICES)
               </button>
 
+              <div style={{ fontSize: 10, color: '#4a6a7a', letterSpacing: 1, marginBottom: 10 }}>FEEDBACK COLLECTED ({load('feedbackLog',[]).length} submissions)</div>
+              <button onClick={exportFeedbackToObsidian} style={{ width:'100%', padding:13, borderRadius:13, border:'1px solid rgba(255,180,50,0.4)', background:'rgba(255,180,50,0.08)', color:'#F5C842', fontFamily:"'Oswald',sans-serif", fontSize:14, fontWeight:700, cursor:'pointer', marginBottom:16 }}>
+                🗒️ EXPORT FEEDBACK TO OBSIDIAN
+              </button>
+
               <div style={{ fontSize: 10, color: '#4a6a7a', letterSpacing: 1, marginBottom: 10 }}>EXPORT TO OBSIDIAN</div>
               {!isMobile ? (
                 <button onClick={exportToObsidianDesktop} style={{ width: '100%', padding: 13, borderRadius: 13, border: '1px solid rgba(168,85,247,0.4)', background: 'rgba(168,85,247,0.1)', color: '#A855F7', fontFamily: "'Oswald',sans-serif", fontSize: 14, fontWeight: 700, cursor: 'pointer' }}>
@@ -5492,6 +5682,15 @@ Include 5-7 exercises. No explanation, just JSON.`;
       {showAuth && AuthModal()}
       {showCheckIn && DailyCheckInModal()}
       {showRoutineBuilder && RoutineBuilderModal()}
+      {showBetaModal && BetaWelcomeModal()}
+      {feedbackOpen && FeedbackModal()}
+
+      {/* ── Floating Feedback Button ── */}
+      {!showBetaModal && !feedbackOpen && (
+        <button onClick={() => { setFbDone(false); setFbMsg(''); setFeedbackOpen(true); }} style={{ position:'fixed', bottom:90, right:16, width:48, height:48, borderRadius:'50%', background:`linear-gradient(135deg,${accentColor},#a855f7)`, border:'none', color:'#fff', fontSize:20, cursor:'pointer', zIndex:800, boxShadow:`0 4px 20px ${accentColor}60`, display:'flex', alignItems:'center', justifyContent:'center' }}>
+          📬
+        </button>
+      )}
 
       {/* ── PENDING CHALLENGE MODAL ── */}
       {pendingChallenge && (
@@ -5543,7 +5742,7 @@ Include 5-7 exercises. No explanation, just JSON.`;
 
 /* ── SERVICE WORKER ── */
 if ('serviceWorker' in navigator) {
-  const sw = `const C='drews-hub-v27';self.addEventListener('install',e=>{e.waitUntil(caches.open(C).then(c=>c.addAll(['.'])));self.skipWaiting();});self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==C).map(k=>caches.delete(k)))));self.clients.claim();});self.addEventListener('fetch',e=>{if(e.request.method!=='GET')return;const u=e.request.url;if(u.includes('api.anthropic.com')||u.includes('openfoodfacts')||u.includes('themealdb')||u.includes('fonts.googleapis')||u.includes('cdnjs')||u.includes('supabase.co'))return;e.respondWith(caches.match(e.request).then(r=>r||fetch(e.request).then(res=>{if(res&&res.ok){const cl=res.clone();caches.open(C).then(c=>c.put(e.request,cl));}return res;})));});`;
+  const sw = `const C='drews-hub-v28';self.addEventListener('install',e=>{e.waitUntil(caches.open(C).then(c=>c.addAll(['.'])));self.skipWaiting();});self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==C).map(k=>caches.delete(k)))));self.clients.claim();});self.addEventListener('fetch',e=>{if(e.request.method!=='GET')return;const u=e.request.url;if(u.includes('api.anthropic.com')||u.includes('openfoodfacts')||u.includes('themealdb')||u.includes('fonts.googleapis')||u.includes('cdnjs')||u.includes('supabase.co'))return;e.respondWith(caches.match(e.request).then(r=>r||fetch(e.request).then(res=>{if(res&&res.ok){const cl=res.clone();caches.open(C).then(c=>c.put(e.request,cl));}return res;})));});`;
   try { navigator.serviceWorker.register(URL.createObjectURL(new Blob([sw], { type: 'application/javascript' }))).catch(() => {}); } catch {}
 }
 

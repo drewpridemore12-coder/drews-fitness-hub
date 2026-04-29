@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Level Up Fitness — Gym Flyer</title>
+  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Oswald:wght@400;600;700&display=swap" rel="stylesheet"/>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    @page { size: 4in 6in; margin: 0; }
+
+    body {
+      background: #0c0c18;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      font-family: 'Oswald', sans-serif;
+    }
+
+    .flyer {
+      width: 4in;
+      min-height: 6in;
+      background: #0c0c18;
+      position: relative;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 0.4in 0.35in 0.35in;
+    }
+
+    /* Glow blobs */
+    .blob1 {
+      position: absolute;
+      width: 3in;
+      height: 3in;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(74,158,255,0.18) 0%, transparent 70%);
+      top: -0.5in;
+      left: -0.5in;
+      pointer-events: none;
+    }
+    .blob2 {
+      position: absolute;
+      width: 2.5in;
+      height: 2.5in;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(168,85,247,0.15) 0%, transparent 70%);
+      bottom: 0.5in;
+      right: -0.3in;
+      pointer-events: none;
+    }
+
+    .top-badge {
+      font-family: 'Oswald', sans-serif;
+      font-size: 9pt;
+      font-weight: 700;
+      letter-spacing: 3px;
+      color: #4a9eff;
+      margin-bottom: 0.12in;
+      position: relative;
+    }
+
+    .brain-emoji {
+      font-size: 52pt;
+      line-height: 1;
+      margin-bottom: 0.1in;
+      position: relative;
+    }
+
+    h1 {
+      font-family: 'Bebas Neue', sans-serif;
+      font-size: 42pt;
+      color: #ffffff;
+      letter-spacing: 3px;
+      text-align: center;
+      line-height: 0.95;
+      position: relative;
+      margin-bottom: 0.06in;
+    }
+    h1 span {
+      background: linear-gradient(135deg, #4a9eff, #a855f7);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .tagline {
+      font-size: 9pt;
+      font-weight: 600;
+      letter-spacing: 2px;
+      color: #4a6a7a;
+      text-align: center;
+      margin-bottom: 0.2in;
+      position: relative;
+    }
+
+    /* Feature pills */
+    .features {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      justify-content: center;
+      margin-bottom: 0.22in;
+      position: relative;
+      width: 100%;
+    }
+    .pill {
+      background: rgba(74,158,255,0.1);
+      border: 1px solid rgba(74,158,255,0.3);
+      border-radius: 20px;
+      padding: 4px 10px;
+      font-size: 7.5pt;
+      font-weight: 600;
+      color: #4a9eff;
+      letter-spacing: 0.5px;
+      white-space: nowrap;
+    }
+    .pill.purple {
+      background: rgba(168,85,247,0.1);
+      border-color: rgba(168,85,247,0.3);
+      color: #a855f7;
+    }
+    .pill.green {
+      background: rgba(75,222,128,0.1);
+      border-color: rgba(75,222,128,0.3);
+      color: #4BDE80;
+    }
+
+    /* QR section */
+    .qr-wrapper {
+      background: #ffffff;
+      border-radius: 16px;
+      padding: 12px;
+      margin-bottom: 0.18in;
+      position: relative;
+      box-shadow: 0 0 40px rgba(74,158,255,0.3);
+    }
+    .qr-wrapper img {
+      display: block;
+      width: 1.4in;
+      height: 1.4in;
+    }
+
+    .scan-text {
+      font-family: 'Bebas Neue', sans-serif;
+      font-size: 16pt;
+      color: #ffffff;
+      letter-spacing: 3px;
+      text-align: center;
+      margin-bottom: 0.05in;
+      position: relative;
+    }
+
+    .url-text {
+      font-size: 8pt;
+      color: #4a9eff;
+      text-align: center;
+      letter-spacing: 1px;
+      margin-bottom: 0.2in;
+      position: relative;
+    }
+
+    /* Divider */
+    .divider {
+      width: 100%;
+      height: 1px;
+      background: linear-gradient(90deg, transparent, rgba(74,158,255,0.4), transparent);
+      margin-bottom: 0.18in;
+      position: relative;
+    }
+
+    /* Bottom features */
+    .bottom-features {
+      width: 100%;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      position: relative;
+    }
+    .feature-box {
+      background: rgba(255,255,255,0.03);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 10px;
+      padding: 10px 10px;
+    }
+    .feature-box .icon { font-size: 14pt; margin-bottom: 4px; }
+    .feature-box .label {
+      font-family: 'Oswald', sans-serif;
+      font-size: 8pt;
+      font-weight: 700;
+      color: #ffffff;
+      letter-spacing: 0.5px;
+      margin-bottom: 2px;
+    }
+    .feature-box .desc {
+      font-family: 'Oswald', sans-serif;
+      font-size: 7pt;
+      color: #4a6a7a;
+      font-weight: 400;
+      line-height: 1.3;
+    }
+
+    .footer {
+      position: relative;
+      margin-top: 0.18in;
+      font-size: 7pt;
+      color: #2a3a4a;
+      text-align: center;
+      letter-spacing: 1px;
+    }
+
+    @media print {
+      body { background: #0c0c18; }
+      .flyer { page-break-inside: avoid; }
+    }
+  </style>
+</head>
+<body>
+  <div class="flyer">
+    <div class="blob1"></div>
+    <div class="blob2"></div>
+
+    <div class="top-badge">FREE • NO SIGN-UP REQUIRED</div>
+
+    <div class="brain-emoji">🧠</div>
+
+    <h1>LEVEL UP<br/><span>FITNESS</span></h1>
+
+    <div class="tagline">AI-POWERED FITNESS TRACKER • FREE FOREVER</div>
+
+    <div class="features">
+      <div class="pill">🔥 Calorie Tracking</div>
+      <div class="pill purple">🤖 AI Coach (LEVEL)</div>
+      <div class="pill green">💪 Workout Logger</div>
+      <div class="pill">📊 Progress Charts</div>
+      <div class="pill purple">🍽️ Meal Planning</div>
+      <div class="pill green">🏆 Challenges</div>
+    </div>
+
+    <div class="qr-wrapper">
+      <img src="https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=https://levelupfitness-app.netlify.app&bgcolor=ffffff&color=0c0c18&qzone=1" alt="QR Code"/>
+    </div>
+
+    <div class="scan-text">SCAN TO OPEN THE APP</div>
+    <div class="url-text">levelupfitness-app.netlify.app</div>
+
+    <div class="divider"></div>
+
+    <div class="bottom-features">
+      <div class="feature-box">
+        <div class="icon">🧠</div>
+        <div class="label">LEVEL AI Coach</div>
+        <div class="desc">Ask anything about your diet, workouts, or progress</div>
+      </div>
+      <div class="feature-box">
+        <div class="icon">📈</div>
+        <div class="label">Smart Tracking</div>
+        <div class="desc">Calories auto-calculated from your body stats & goal</div>
+      </div>
+      <div class="feature-box">
+        <div class="icon">🏋️</div>
+        <div class="label">Custom Routines</div>
+        <div class="desc">Build your own workout or let AI generate one</div>
+      </div>
+      <div class="feature-box">
+        <div class="icon">🔗</div>
+        <div class="label">Challenge Friends</div>
+        <div class="desc">Live P2P challenges — no account needed</div>
+      </div>
+    </div>
+
+    <div class="footer">LEVELUPFITNESS-APP.NETLIFY.APP • FREE • WORKS ON ANY PHONE</div>
+  </div>
+</body>
+</html>
