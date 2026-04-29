@@ -1028,6 +1028,11 @@ function FitnessHub() {
   const [fbSubmitting,  setFbSubmitting]  = useState(false);
   const [fbDone,        setFbDone]        = useState(false);
 
+  /* ── Admin feedback panel ── */
+  const [adminFeedback,        setAdminFeedback]        = useState([]);
+  const [adminFeedbackLoading, setAdminFeedbackLoading] = useState(false);
+  const [adminFeedbackLoaded,  setAdminFeedbackLoaded]  = useState(false);
+
   /* ── LEVEL Memory — learns users over time ── */
   const [userMemory, setUserMemory] = useState(() => load('userMemory', {
     struggles: [], wins: [], conversationCount: 0, lastTopics: [], dietNotes: [], personalityNotes: []
@@ -2118,17 +2123,49 @@ Write a 4-sentence weekly review: 1) What went well (cite a specific number), 2)
     setFbSubmitting(false);
   }
 
-  /* ── Export all feedback to Obsidian ── */
-  function exportFeedbackToObsidian() {
-    const log = load('feedbackLog', []);
-    if (!log.length) { showToast('No feedback collected yet', 'info'); return; }
+  /* ── Export ALL feedback (from Supabase) to Drew's Obsidian ── */
+  async function exportFeedbackToObsidian() {
+    showToast('Fetching all feedback…', 'info');
+    let log = [];
+    if (_sb) {
+      try {
+        const { data, error } = await _sb.from('feedback').select('*').order('created_at', { ascending: false });
+        if (!error && data?.length) log = data;
+      } catch(e) {}
+    }
+    // Fallback to local if Supabase empty
+    if (!log.length) log = load('feedbackLog', []);
+    if (!log.length) { showToast('No feedback yet', 'info'); return; }
     const byType = { bug: log.filter(f=>f.type==='bug'), idea: log.filter(f=>f.type==='idea'), general: log.filter(f=>f.type==='general') };
     const avgRating = (log.reduce((s,f)=>s+(f.rating||0),0)/log.length).toFixed(1);
-    const content = `# 📊 Level Up Fitness — User Feedback\n\nExported: ${new Date().toLocaleDateString()}\nTotal: ${log.length} submissions | Avg Rating: ⭐${avgRating}/5\n🐛 Bugs: ${byType.bug.length} | 💡 Ideas: ${byType.idea.length} | 💬 General: ${byType.general.length}\n\n---\n\n${['bug','idea','general'].flatMap(t=>byType[t].length ? [`## ${t==='bug'?'🐛 Bug Reports':t==='idea'?'💡 Feature Ideas':'💬 General Feedback'}\n`,...byType[t].map(f=>`### ${(f.timestamp||'').split('T')[0]} — ⭐${f.rating}/5 (${f.user_name})\n${f.message}\n`)] : []).join('\n---\n\n')}`;
+    const header = `# 📊 Level Up Fitness — User Feedback\n\nExported: ${new Date().toLocaleDateString()}\nTotal: ${log.length} | Avg Rating: ⭐${avgRating}/5\n🐛 Bugs: ${byType.bug.length} | 💡 Ideas: ${byType.idea.length} | 💬 General: ${byType.general.length}\n\n---\n`;
+    const sections = ['bug','idea','general'].map(t => {
+      if (!byType[t].length) return '';
+      const title = t==='bug'?'## 🐛 Bug Reports':t==='idea'?'## 💡 Feature Ideas':'## 💬 General Feedback';
+      const entries = byType[t].map(f => {
+        const date = (f.created_at||f.timestamp||'').split('T')[0];
+        return `### ${date} — ⭐${f.rating||'?'}/5\n**User:** ${f.user_name||'anon'} | **Goal:** ${f.user_goal||'–'}\n\n${f.message||'(no message)'}\n`;
+      }).join('\n---\n\n');
+      return `${title}\n\n${entries}`;
+    }).filter(Boolean).join('\n\n---\n\n');
+    const content = header + '\n' + sections;
     const vn = vaultName?.trim();
-    const uri = `obsidian://new?${vn?`vault=${encodeURIComponent(vn)}&`:''}name=${encodeURIComponent('Level Up — User Feedback')}&content=${encodeURIComponent(content)}`;
+    const uri = `obsidian://new?${vn?`vault=${encodeURIComponent(vn)}&`:''}name=${encodeURIComponent('Level Up — User Feedback '+new Date().toLocaleDateString())}&content=${encodeURIComponent(content)}`;
     window.location.href = uri;
     showToast('Opening Obsidian…', 'info');
+  }
+
+  /* ── Load admin feedback from Supabase ── */
+  async function loadAdminFeedback() {
+    if (!_sb) { showToast('Not connected to Supabase', 'error'); return; }
+    setAdminFeedbackLoading(true);
+    try {
+      const { data, error } = await _sb.from('feedback').select('*').order('created_at', { ascending: false }).limit(100);
+      if (error) throw error;
+      setAdminFeedback(data || []);
+      setAdminFeedbackLoaded(true);
+    } catch(e) { showToast('Failed to load feedback: ' + (e.message||e), 'error'); }
+    setAdminFeedbackLoading(false);
   }
 
   /* ── Beta Welcome Modal ── */
@@ -5106,11 +5143,6 @@ Write a 4-sentence weekly review: 1) What went well (cite a specific number), 2)
                 📱 COPY SYNC LINK (FOR OTHER DEVICES)
               </button>
 
-              <div style={{ fontSize: 10, color: '#4a6a7a', letterSpacing: 1, marginBottom: 10 }}>FEEDBACK COLLECTED ({load('feedbackLog',[]).length} submissions)</div>
-              <button onClick={exportFeedbackToObsidian} style={{ width:'100%', padding:13, borderRadius:13, border:'1px solid rgba(255,180,50,0.4)', background:'rgba(255,180,50,0.08)', color:'#F5C842', fontFamily:"'Oswald',sans-serif", fontSize:14, fontWeight:700, cursor:'pointer', marginBottom:16 }}>
-                🗒️ EXPORT FEEDBACK TO OBSIDIAN
-              </button>
-
               <div style={{ fontSize: 10, color: '#4a6a7a', letterSpacing: 1, marginBottom: 10 }}>EXPORT TO OBSIDIAN</div>
               {!isMobile ? (
                 <button onClick={exportToObsidianDesktop} style={{ width: '100%', padding: 13, borderRadius: 13, border: '1px solid rgba(168,85,247,0.4)', background: 'rgba(168,85,247,0.1)', color: '#A855F7', fontFamily: "'Oswald',sans-serif", fontSize: 14, fontWeight: 700, cursor: 'pointer' }}>
@@ -5120,6 +5152,46 @@ Write a 4-sentence weekly review: 1) What went well (cite a specific number), 2)
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
                   <button onClick={() => exportToObsidianMobile('log')} style={{ padding: 12, borderRadius: 12, border: '1px solid rgba(168,85,247,0.4)', background: 'rgba(168,85,247,0.1)', color: '#A855F7', fontFamily: "'Oswald',sans-serif", fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>📲 DAILY LOG</button>
                   <button onClick={() => exportToObsidianMobile('workout')} style={{ padding: 12, borderRadius: 12, border: '1px solid rgba(168,85,247,0.4)', background: 'rgba(168,85,247,0.1)', color: '#A855F7', fontFamily: "'Oswald',sans-serif", fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>📲 WORKOUT</button>
+                </div>
+              )}
+
+              {/* ── ADMIN PANEL — only visible to Drew ── */}
+              {currentUser?.email === 'drewpridemore12@gmail.com' && (
+                <div style={{ marginTop:28, padding:16, background:'rgba(245,200,66,0.05)', borderRadius:14, border:'1px solid rgba(245,200,66,0.2)' }}>
+                  <div style={{ fontSize:10, color:'#F5C842', letterSpacing:1, marginBottom:12 }}>🔑 ADMIN — USER FEEDBACK</div>
+                  {!adminFeedbackLoaded ? (
+                    <button onClick={loadAdminFeedback} disabled={adminFeedbackLoading} style={{ width:'100%', padding:12, borderRadius:12, border:'1px solid rgba(245,200,66,0.35)', background:'rgba(245,200,66,0.08)', color:'#F5C842', fontFamily:"'Oswald',sans-serif", fontSize:13, fontWeight:700, cursor:'pointer', marginBottom:10 }}>
+                      {adminFeedbackLoading ? '⏳ LOADING…' : '📥 LOAD ALL FEEDBACK FROM SUPABASE'}
+                    </button>
+                  ) : (
+                    <>
+                      <div style={{ fontSize:12, color:'#aaa', marginBottom:10 }}>
+                        <span style={{ color:'#F5C842', fontWeight:700 }}>{adminFeedback.length}</span> total submissions &nbsp;·&nbsp;
+                        <span style={{ color:'#ff6b6b' }}>🐛 {adminFeedback.filter(f=>f.type==='bug').length} bugs</span> &nbsp;·&nbsp;
+                        <span style={{ color:'#4BDE80' }}>💡 {adminFeedback.filter(f=>f.type==='idea').length} ideas</span> &nbsp;·&nbsp;
+                        ⭐ {adminFeedback.length ? (adminFeedback.reduce((s,f)=>s+(f.rating||0),0)/adminFeedback.length).toFixed(1) : '–'}/5 avg
+                      </div>
+                      {/* Preview last 5 entries */}
+                      <div style={{ maxHeight:240, overflowY:'auto', marginBottom:10 }}>
+                        {adminFeedback.slice(0,5).map((f,i) => (
+                          <div key={i} style={{ background:'rgba(255,255,255,0.03)', borderRadius:10, padding:'10px 12px', marginBottom:8, borderLeft:`3px solid ${f.type==='bug'?'#ff6b6b':f.type==='idea'?'#4BDE80':'#4a9eff'}` }}>
+                            <div style={{ display:'flex', justifyContent:'space-between', marginBottom:4 }}>
+                              <span style={{ fontSize:10, color:'#888' }}>{(f.created_at||'').split('T')[0]} · {f.user_name||'anon'} · {f.user_goal||'–'}</span>
+                              <span style={{ fontSize:10, color:'#F5C842' }}>⭐{f.rating||'?'}</span>
+                            </div>
+                            <div style={{ fontSize:12, color:'#ccc', lineHeight:1.5 }}>{(f.message||'').substring(0,120)}{(f.message||'').length>120?'…':''}</div>
+                          </div>
+                        ))}
+                        {adminFeedback.length > 5 && <div style={{ fontSize:11, color:'#555', textAlign:'center' }}>+{adminFeedback.length-5} more — export to see all</div>}
+                      </div>
+                      <button onClick={exportFeedbackToObsidian} style={{ width:'100%', padding:12, borderRadius:12, border:'1px solid rgba(245,200,66,0.4)', background:'rgba(245,200,66,0.1)', color:'#F5C842', fontFamily:"'Oswald',sans-serif", fontSize:13, fontWeight:700, cursor:'pointer', marginBottom:8 }}>
+                        🗒️ EXPORT ALL TO OBSIDIAN VAULT
+                      </button>
+                      <button onClick={loadAdminFeedback} style={{ width:'100%', padding:10, borderRadius:12, border:'1px solid rgba(255,255,255,0.08)', background:'transparent', color:'#555', fontFamily:'inherit', fontSize:12, cursor:'pointer' }}>
+                        🔄 Refresh
+                      </button>
+                    </>
+                  )}
                 </div>
               )}
 
@@ -5742,7 +5814,7 @@ Include 5-7 exercises. No explanation, just JSON.`;
 
 /* ── SERVICE WORKER ── */
 if ('serviceWorker' in navigator) {
-  const sw = `const C='drews-hub-v28';self.addEventListener('install',e=>{e.waitUntil(caches.open(C).then(c=>c.addAll(['.'])));self.skipWaiting();});self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==C).map(k=>caches.delete(k)))));self.clients.claim();});self.addEventListener('fetch',e=>{if(e.request.method!=='GET')return;const u=e.request.url;if(u.includes('api.anthropic.com')||u.includes('openfoodfacts')||u.includes('themealdb')||u.includes('fonts.googleapis')||u.includes('cdnjs')||u.includes('supabase.co'))return;e.respondWith(caches.match(e.request).then(r=>r||fetch(e.request).then(res=>{if(res&&res.ok){const cl=res.clone();caches.open(C).then(c=>c.put(e.request,cl));}return res;})));});`;
+  const sw = `const C='drews-hub-v29';self.addEventListener('install',e=>{e.waitUntil(caches.open(C).then(c=>c.addAll(['.'])));self.skipWaiting();});self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==C).map(k=>caches.delete(k)))));self.clients.claim();});self.addEventListener('fetch',e=>{if(e.request.method!=='GET')return;const u=e.request.url;if(u.includes('api.anthropic.com')||u.includes('openfoodfacts')||u.includes('themealdb')||u.includes('fonts.googleapis')||u.includes('cdnjs')||u.includes('supabase.co'))return;e.respondWith(caches.match(e.request).then(r=>r||fetch(e.request).then(res=>{if(res&&res.ok){const cl=res.clone();caches.open(C).then(c=>c.put(e.request,cl));}return res;})));});`;
   try { navigator.serviceWorker.register(URL.createObjectURL(new Blob([sw], { type: 'application/javascript' }))).catch(() => {}); } catch {}
 }
 
