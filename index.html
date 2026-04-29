@@ -5,11 +5,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no"/>
   <meta name="apple-mobile-web-app-capable" content="yes"/>
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
-  <meta name="apple-mobile-web-app-title" content="Drew's Hub"/>
+  <meta name="apple-mobile-web-app-title" content="Level Up Fitness"/>
   <meta name="mobile-web-app-capable" content="yes"/>
   <meta name="theme-color" content="#0c0c18"/>
-  <title>Drew's Fitness Hub</title>
-  <link rel="manifest" href="data:application/json,{%22name%22:%22Drew's Fitness Hub%22,%22short_name%22:%22Drew's Hub%22,%22start_url%22:%22.%22,%22display%22:%22standalone%22,%22background_color%22:%22%230c0c18%22,%22theme_color%22:%22%230c0c18%22,%22icons%22:[{%22src%22:%22data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='100' fill='%230c0c18'/%3E%3Ctext x='256' y='340' font-size='280' text-anchor='middle'%3E%F0%9F%92%AA%3C/text%3E%3C/svg%3E%22,%22sizes%22:%22512x512%22,%22type%22:%22image/svg+xml%22,%22purpose%22:%22any maskable%22}]}"/>
+  <title>Level Up Fitness</title>
+  <link rel="manifest" href="data:application/json,{%22name%22:%22Level Up Fitness%22,%22short_name%22:%22Level Up%22,%22start_url%22:%22.%22,%22display%22:%22standalone%22,%22background_color%22:%22%230c0c18%22,%22theme_color%22:%22%230c0c18%22,%22icons%22:[{%22src%22:%22data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='100' fill='%230c0c18'/%3E%3Ctext x='256' y='340' font-size='280' text-anchor='middle'%3E%F0%9F%A7%A0%3C/text%3E%3C/svg%3E%22,%22sizes%22:%22512x512%22,%22type%22:%22image/svg+xml%22,%22purpose%22:%22any maskable%22}]}"/>
   <link rel="apple-touch-icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'><rect width='512' height='512' rx='100' fill='%230c0c18'/><text x='256' y='340' font-size='280' text-anchor='middle'>💪</text></svg>"/>
   <style>*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}html,body{height:100%;overflow:hidden;background:#0c0c18;}#root{height:100%;}body{-webkit-font-smoothing:antialiased;}</style>
 </head>
@@ -393,18 +393,46 @@ function BarcodeScanner({onScan, onClose}){
 
 /* ── WORKOUT TIMER ── */
 function WorkoutTimerApp({onBack,onSave,customRoutines=[]}){
-  const [screen,setScreen]=useState("select");
-  const [selectedDay,setSelectedDay]=useState(null);
-  const [elapsed,setElapsed]=useState(0);
-  const [exIdx,setExIdx]=useState(0);
-  const [phase,setPhase]=useState("ready");
+  /* ── Draft restore: resume unfinished session ── */
+  const _draft=load('sessionDraft',null);
+  const _hasDraft=!!(_draft&&_draft.selectedDay!==null&&_draft.screen==='session');
+
+  const [screen,setScreen]=useState(_hasDraft?'session':'select');
+  const [selectedDay,setSelectedDay]=useState(_hasDraft?_draft.selectedDay:null);
+  const [elapsed,setElapsed]=useState(_hasDraft?(_draft.elapsed||0):0);
+  const [exIdx,setExIdx]=useState(_hasDraft?(_draft.exIdx||0):0);
+  const [phase,setPhase]=useState('ready');
   const [restSec,setRestSec]=useState(90);
   const [restTotal,setRestTotal]=useState(90);
   const [customRest,setCustomRest]=useState(90);
-  const [setLogs,setSetLogs]=useState({});
-  const [inputReps,setInputReps]=useState("");
-  const [inputWeight,setInputWeight]=useState("");
+  const [setLogs,setSetLogs]=useState(_hasDraft?(_draft.setLogs||{}):{});
+  const [inputReps,setInputReps]=useState('');
+  const [inputWeight,setInputWeight]=useState('');
   const [summary,setSummary]=useState(null);
+  const [showResumeBar,setShowResumeBar]=useState(_hasDraft);
+
+  /* Save draft on elapsed tick so mid-session close is recoverable */
+  useEffect(()=>{
+    if(screen==='session'&&selectedDay!==null){
+      save('sessionDraft',{screen,selectedDay,setLogs,elapsed,exIdx,phase});
+    }
+  },[elapsed]);
+
+  /* visibilitychange: force-save whenever app goes to background */
+  useEffect(()=>{
+    const onHide=()=>{
+      if(screen==='session'&&selectedDay!==null){
+        save('sessionDraft',{screen,selectedDay,setLogs,elapsed,exIdx,phase});
+        console.log('[LEVEL] session draft saved on visibility hide');
+      }
+    };
+    document.addEventListener('visibilitychange',onHide);
+    window.addEventListener('beforeunload',onHide);
+    return()=>{
+      document.removeEventListener('visibilitychange',onHide);
+      window.removeEventListener('beforeunload',onHide);
+    };
+  },[screen,selectedDay,setLogs,elapsed,exIdx,phase]);
   const restRef=useRef(null); const elapsedRef=useRef(null); const audioCtx=useRef(null);
   const allWorkouts=[...WORKOUTS,...customRoutines];
   const workout=selectedDay!==null?allWorkouts[selectedDay]:null;
@@ -420,8 +448,26 @@ function WorkoutTimerApp({onBack,onSave,customRoutines=[]}){
   useEffect(()=>{if(screen!=="session"){clearInterval(elapsedRef.current);return;}elapsedRef.current=setInterval(()=>setElapsed(e=>e+1),1000);return()=>clearInterval(elapsedRef.current);},[screen]);
   useEffect(()=>{clearInterval(restRef.current);if(phase!=="resting")return;restRef.current=setInterval(()=>{setRestSec(s=>{if(s<=1){clearInterval(restRef.current);tripleBeep();if(navigator.vibrate)navigator.vibrate([200,100,200,100,400]);setPhase("ready");return 0;}if(s===11)beep(440,0.08,0.15);return s-1;});},1000);return()=>clearInterval(restRef.current);},[phase]);
 
-  function startSession(dayIdx){setSelectedDay(dayIdx);setExIdx(0);setPhase("ready");setSetLogs({});setElapsed(0);setInputReps("");setInputWeight("");setScreen("session");if(navigator.vibrate)navigator.vibrate(100);}
-  function logSet(){const reps=inputReps||exercise.reps,weight=inputWeight||"BW";setSetLogs(prev=>({...prev,[exIdx]:[...(prev[exIdx]||[]),{reps,weight,time:elapsed}]}));setInputReps("");setInputWeight("");beep(660,0.12,0.3);if(navigator.vibrate)navigator.vibrate(60);const rd=customRest||exercise.rest;setRestTotal(rd);setRestSec(rd);setPhase("resting");}
+  function startSession(dayIdx){
+    setSelectedDay(dayIdx);setExIdx(0);setPhase("ready");setSetLogs({});setElapsed(0);
+    setInputReps("");setInputWeight("");setShowResumeBar(false);
+    save('sessionDraft',{screen:'session',selectedDay:dayIdx,setLogs:{},elapsed:0,exIdx:0,phase:'ready'});
+    setScreen("session");if(navigator.vibrate)navigator.vibrate(100);
+  }
+  function discardDraft(){save('sessionDraft',null);setShowResumeBar(false);setScreen('select');}
+  function logSet(){
+    const reps=inputReps||exercise.reps;
+    const weight=inputWeight||"BW";
+    const setEntry={reps,weight,time:elapsed,weightNum:parseFloat(weight)||0,repsNum:parseInt(reps)||0};
+    console.log('[LEVEL] logSet:',{exercise:exercise.name,reps,weight,weightNum:setEntry.weightNum,setEntry});
+    setSetLogs(prev=>{
+      const updated={...prev,[exIdx]:[...(prev[exIdx]||[]),setEntry]};
+      save('sessionDraft',{screen:'session',selectedDay,setLogs:updated,elapsed,exIdx,phase:'resting'});
+      return updated;
+    });
+    setInputReps("");setInputWeight("");beep(660,0.12,0.3);if(navigator.vibrate)navigator.vibrate(60);
+    const rd=customRest||exercise.rest;setRestTotal(rd);setRestSec(rd);setPhase("resting");
+  }
   function skipRest(){clearInterval(restRef.current);setPhase("ready");setRestSec(0);beep(440,0.08);}
   function addRest(s){setRestSec(r=>r+s);setRestTotal(t=>t+s);}
   function nextExercise(){if(exIdx<workout.exercises.length-1){setExIdx(i=>i+1);setPhase("ready");clearInterval(restRef.current);beep(550,0.15,0.3);}else finishSession();}
@@ -429,9 +475,23 @@ function WorkoutTimerApp({onBack,onSave,customRoutines=[]}){
   function finishSession(){
     clearInterval(elapsedRef.current);clearInterval(restRef.current);
     const total=Object.values(setLogs).reduce((a,v)=>a+v.length,0);
-    const exData=workout.exercises.map((ex,i)=>({name:ex.name,targetSets:ex.sets,completed:(setLogs[i]||[]).length,sets:setLogs[i]||[]}));
-    setSummary({day:workout.day,focus:workout.focus,color:workout.color,duration:elapsed,totalSets:total,exercises:exData,date:new Date().toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric"})});
-    onSave&&onSave({id:Date.now(),date:new Date().toISOString(),day:workout.day,focus:workout.focus,color:workout.color,tag:workout.tag,duration:elapsed,totalSets:total,exercises:exData});
+    const exData=workout.exercises.map((ex,i)=>{
+      const sets=(setLogs[i]||[]).map(s=>({
+        ...s,
+        weight: s.weight,
+        reps: s.reps,
+        weightNum: parseFloat(s.weight)||0,
+        repsNum: parseInt(s.reps)||0,
+      }));
+      const maxWeight=sets.reduce((mx,s)=>Math.max(mx,parseFloat(s.weight)||0),0);
+      const completed=sets.length;
+      console.log('[LEVEL] exercise saved:',ex.name,'sets:',completed,'maxWeight:',maxWeight,'raw:',sets);
+      return{name:ex.name,targetSets:ex.sets,completed,completedSets:completed,maxWeight,sets};
+    });
+    console.log('[LEVEL] finishSession payload:',{duration:elapsed,totalSets:total,exercises:exData});
+    save('sessionDraft',null);
+    setSummary({day:workout.day,focus:workout.focus||workout.name,color:workout.color,duration:elapsed,totalSets:total,exercises:exData,date:new Date().toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric"})});
+    onSave&&onSave({id:Date.now(),date:new Date().toISOString(),day:workout.day,focus:workout.focus||workout.name,color:workout.color,tag:workout.tag,duration:elapsed,totalSets:total,exercises:exData});
     setScreen("summary");tripleBeep();if(navigator.vibrate)navigator.vibrate([300,100,300,100,600]);
   }
 
@@ -441,6 +501,19 @@ function WorkoutTimerApp({onBack,onSave,customRoutines=[]}){
 
   if(screen==="select")return(
     <div style={{height:"100%",overflowY:"auto",background:"#080c10",paddingBottom:32}}>
+      {/* Resume banner */}
+      {showResumeBar&&(
+        <div style={{background:"rgba(75,222,128,0.12)",borderBottom:"1px solid rgba(75,222,128,0.2)",padding:"10px 20px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <div>
+            <div style={{fontSize:12,color:"#4BDE80",fontWeight:700}}>⚡ UNFINISHED SESSION FOUND</div>
+            <div style={{fontSize:10,color:"#3a5a6a"}}>You left mid-workout. Continue where you stopped?</div>
+          </div>
+          <div style={{display:"flex",gap:6}}>
+            <button onClick={()=>setScreen('session')} style={{padding:"6px 12px",borderRadius:8,border:"1px solid #4BDE80",background:"rgba(75,222,128,0.15)",color:"#4BDE80",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>Resume</button>
+            <button onClick={discardDraft} style={{padding:"6px 10px",borderRadius:8,border:"1px solid rgba(255,255,255,0.1)",background:"transparent",color:"#555",fontSize:12,cursor:"pointer",fontFamily:"inherit"}}>Discard</button>
+          </div>
+        </div>
+      )}
       <div style={{padding:"max(env(safe-area-inset-top),16px) 20px 0"}}>
         <button onClick={onBack} style={{background:"rgba(255,255,255,0.06)",border:"none",color:"#aaa",borderRadius:10,padding:"8px 14px",cursor:"pointer",fontFamily:"inherit",fontSize:13,fontWeight:600,marginBottom:20}}>← Hub</button>
         <div style={{textAlign:"center",marginBottom:24}}>
@@ -518,7 +591,7 @@ function WorkoutTimerApp({onBack,onSave,customRoutines=[]}){
   return(
     <div style={{height:"100%",display:"flex",flexDirection:"column",background:"#080c10",maxWidth:480,margin:"0 auto"}}>
       <div style={{padding:"max(env(safe-area-inset-top),14px) 20px 0",display:"flex",alignItems:"center",justifyContent:"space-between",flexShrink:0}}>
-        <button onClick={()=>setScreen("select")} style={{background:"rgba(255,255,255,0.05)",border:"none",color:"#3a5a6a",borderRadius:10,padding:"8px 12px",cursor:"pointer",fontFamily:"inherit",fontSize:12,fontWeight:600}}>← Exit</button>
+        <button onClick={()=>{save('sessionDraft',null);setScreen("select");}} style={{background:"rgba(255,255,255,0.05)",border:"none",color:"#3a5a6a",borderRadius:10,padding:"8px 12px",cursor:"pointer",fontFamily:"inherit",fontSize:12,fontWeight:600}}>← Exit</button>
         <div style={{textAlign:"center"}}>
           <div style={{fontFamily:"'Bebas Neue',sans-serif",fontSize:13,letterSpacing:2,color:"#3a5a6a"}}>{workout.focus.toUpperCase()}</div>
           <div style={{fontSize:11,color:"#4A9EFF",fontWeight:700}}>⏱ {fmtTime(elapsed)}</div>
@@ -990,6 +1063,32 @@ function FitnessHub() {
   useEffect(() => save('levelMsgs',        levelMsgs),        [levelMsgs]);
   useEffect(() => save('customRoutines',   customRoutines),   [customRoutines]);
   useEffect(() => { if (screen === 'level') levelChatEndRef.current?.scrollIntoView({ behavior:'smooth' }); }, [levelMsgs, levelTyping, screen]);
+
+  /* ── Global persistence: force-save critical state on hide/unload ── */
+  useEffect(() => {
+    const forceSave = () => {
+      try {
+        save('workoutVault',  vault);
+        save('shopList',      shopList);
+        save('checkIns',      checkIns);
+        save('mealPlan',      mealPlan);
+        save('userXP',        userXP);
+        save('levelMsgs',     levelMsgs);
+        save('customRoutines',customRoutines);
+        const today = todayStr();
+        const todayEntries = load('entries_' + today, []);
+        if (todayEntries.length > 0) save('entries_' + today, todayEntries);
+        console.log('[LEVEL] forceSave: all state written to localStorage');
+      } catch(e) { console.warn('[LEVEL] forceSave error', e); }
+    };
+    const onVis = () => { if (document.visibilityState === 'hidden') forceSave(); };
+    document.addEventListener('visibilitychange', onVis);
+    window.addEventListener('beforeunload', forceSave);
+    return () => {
+      document.removeEventListener('visibilitychange', onVis);
+      window.removeEventListener('beforeunload', forceSave);
+    };
+  }, [vault, shopList, checkIns, mealPlan, userXP, levelMsgs, customRoutines]);
   /* sync settings staging state whenever the modal opens */
   useEffect(() => {
     if (showSettings) { setSKey(apiKey); setSUrl(vercelUrl); setSBudget(String(weekBudget)); setSVaultName(vaultName); }
@@ -1548,6 +1647,59 @@ Write a 4-sentence weekly review: 1) What went well (cite a specific number), 2)
   ══════════════════════════════════════════════ */
 
   /* ── LAYER 1: State Builder ── */
+  /* ── LEVEL: Ingredient / Recipe helpers ── */
+  function parseIngredientRequest(msg) {
+    const m = msg.toLowerCase();
+    const toOzMap = { lb:16,lbs:16,pound:16,pounds:16,oz:1,ounce:1,ounces:1,g:0.035,gram:0.035,grams:0.035,kg:35.2,cup:8,cups:8,can:13,cans:13 };
+    const wordQty = { half:0.5, quarter:0.25, one:1, two:2, three:3, four:4 };
+    let qty = null, unit = 'unit';
+    const numM = m.match(/(\d+(?:\.\d+)?)\s*(lb|lbs|pound|pounds|oz|ounce|ounces|cup|cups|can|cans|g|gram|grams|kg|piece|pieces|breast|breasts|scoop|scoops)?/);
+    const wrdM = m.match(/\b(half|quarter|one|two|three|four)\b/);
+    if (numM) { qty = parseFloat(numM[1]); unit = numM[2] || 'unit'; }
+    else if (wrdM) { qty = wordQty[wrdM[1]]; unit = 'unit'; }
+    let ingredient = m
+      .replace(/\b(i have|i got|i own|i already have|make me something with|make something with|make (me\s*)?a? recipe (with|using)|cook with|use my|using my|make with|i want to (use|cook|make)|what can i (make|cook) with)\b/gi,'')
+      .replace(numM?.[0]||'__NOPE__','')
+      .replace(wrdM?.[0]||'__NOPE__','')
+      .replace(/\b(of|some|a|an|the|and|my|me)\b/gi,'')
+      .replace(/[,\.!?]/g,'')
+      .trim();
+    console.log('[LEVEL] parseIngredientRequest:', { qty, unit, ingredient });
+    return { qty, unit, ingredient, toOzMap };
+  }
+
+  function findBestRecipe(ingredient) {
+    const all = [...(saved||[]), ...SEED_RECIPES];
+    if (!ingredient || ingredient.length < 2) return null;
+    const kw = ingredient.toLowerCase().split(/\s+/).filter(w => w.length > 2);
+    if (!kw.length) return null;
+    const scored = all.map(r => {
+      const body = [r.name, ...(r.ingredients||[]).map(i=>i.item||i.name||'')].join(' ').toLowerCase();
+      const score = kw.reduce((s,k) => s + (body.includes(k) ? (r.name.toLowerCase().includes(k)?3:1) : 0), 0);
+      return { r, score };
+    }).filter(x=>x.score>0).sort((a,b)=>b.score-a.score);
+    return scored.length ? scored[0].r : null;
+  }
+
+  function scaleRecipeByIngredient(recipe, ingredient, userQty, userUnit) {
+    if (!userQty || !recipe) return { factor:1, scaledIngredients: recipe?.ingredients||[] };
+    const toOz = { lb:16,lbs:16,pound:16,pounds:16,oz:1,ounce:1,ounces:1,g:0.035,gram:0.035,grams:0.035,kg:35.2,cup:8,cups:8,can:13,cans:13,unit:1 };
+    const kw = (ingredient||'').toLowerCase().split(/\s+/).filter(w=>w.length>2);
+    const found = (recipe.ingredients||[]).find(i => {
+      const name = (i.item||i.name||'').toLowerCase();
+      return kw.some(w => name.includes(w));
+    });
+    if (!found || !found.qty) return { factor:1, scaledIngredients: recipe.ingredients||[] };
+    const recipeOz = (found.qty||1) * (toOz[(found.unit||'').toLowerCase()]||1);
+    const userOz   = userQty        * (toOz[(userUnit ||'').toLowerCase()]||1);
+    const factor   = Math.round((userOz / recipeOz) * 100) / 100;
+    const scaledIngredients = (recipe.ingredients||[]).map(i => ({
+      ...i, qty: i.qty ? Math.round(i.qty * factor * 10) / 10 : i.qty
+    }));
+    console.log('[LEVEL] scaleRecipe:', recipe.name, '× factor', factor);
+    return { factor, scaledIngredients };
+  }
+
   function buildUserState() {
     const today = todayStr();
     const todayEntries = load('entries_' + today, []);
@@ -1607,6 +1759,8 @@ Write a 4-sentence weekly review: 1) What went well (cite a specific number), 2)
     if (m.includes('tired') || m.includes('sore') || m.includes('recover') || m.includes('exhausted') || m.includes('sleep')) return 'recovery';
     if (m.includes('budget') || m.includes('money') || m.includes('cheap') || m.includes('afford') || m.includes('expensive')) return 'budget';
     if (m.includes('pr') || m.includes('personal record') || m.includes('strongest') || m.includes('max') || m.includes('bench') || m.includes('squat') || m.includes('deadlift')) return 'strength';
+    if (m.includes('i have') || m.includes('i got') || m.includes('i own') || m.includes('i already have') || m.includes('using my') || m.includes('cook with') || m.includes('make with') || m.includes('what can i make') || m.includes('what can i cook') || m.includes('recipe for') || m.includes('recipe with') || m.includes('make something with')) return 'ingredientCook';
+    if (m.includes('add to grocery') || m.includes('add to shopping') || m.includes('grocery list') || m.includes('shopping list') || m.includes('need to buy') || m.includes('need to get')) return 'groceryAction';
     if (m.includes('routine') || m.includes('program') || m.includes('build me') || m.includes('make me') || m.includes('create') || m.includes('workout plan') || m.includes('training plan') || m.includes('make a') || m.includes('build a')) return 'buildRoutine';
     return 'general';
   }
@@ -1635,7 +1789,7 @@ Write a 4-sentence weekly review: 1) What went well (cite a specific number), 2)
   }
 
   /* ── LAYER 4: Decision Engine ── */
-  function makeDecision(intent, rules, state) {
+  function makeDecision(intent, rules, state, rawMsg='') {
     const topRule = rules[0];
     switch (intent) {
       case 'postWorkout':
@@ -1746,6 +1900,64 @@ Write a 4-sentence weekly review: 1) What went well (cite a specific number), 2)
           why: `Batch cooking 2-3x/week cuts grocery spend by 30-40% vs daily meal prep.`,
         };
       }
+      case 'ingredientCook': {
+        const { qty, unit, ingredient } = parseIngredientRequest(rawMsg);
+        const recipe = findBestRecipe(ingredient);
+        if (!recipe) {
+          return {
+            insight: `Ingredient detected: "${ingredient || 'unknown'}"`,
+            decision: `No matching recipe found for that ingredient in your library or the built-in recipes.`,
+            options: [
+              `Try: "I have ground turkey" or "I have chicken breast"`,
+              `Browse recipes in the Cook tab`,
+              `Your pantry: ${state.pantryItems.length ? state.pantryItems.join(', ') : 'empty — add items in Planner'}`,
+            ],
+            why: `LEVEL searches your saved recipes + 5 built-in high-protein recipes. Add more in the Cook tab to expand matching.`,
+          };
+        }
+        const { factor, scaledIngredients } = scaleRecipeByIngredient(recipe, ingredient, qty, unit);
+        const actualIngs = scaledIngredients || recipe.ingredients || [];
+        const pantryLC = state.pantryItems.map(p => p.toLowerCase());
+        // Remove: the ingredient the user already has + anything in pantry
+        const groceryAdditions = actualIngs
+          .filter(i => {
+            const nm = (i.item||i.name||'').toLowerCase();
+            const userHas = (ingredient||'').toLowerCase().split(/\s+/).filter(w=>w.length>2).some(w=>nm.includes(w));
+            const inPantry = pantryLC.some(p => nm.includes(p.split(' ')[0]) || p.includes(nm.split(' ')[0]));
+            return !userHas && !inPantry;
+          })
+          .map(i => `${i.qty ? i.qty + ' ' : ''}${i.unit ? i.unit + ' ' : ''}${(i.item||i.name||'').trim()}`.trim())
+          .filter(Boolean);
+        const scaleNote = factor !== 1 ? ` (scaled ×${factor} from original)` : '';
+        const macros = `${Math.round((recipe.protein||0)*factor)}g protein · ${Math.round((recipe.calories||recipe.cal||0)*factor)} kcal`;
+        const ingList = actualIngs.map(i=>`${i.qty?i.qty+' ':''}${i.unit?i.unit+' ':''}${i.item||i.name||''}`).join(', ');
+        const steps = (recipe.instructions||[]).map((s,i)=>`${i+1}. ${s}`).join('\n');
+        return {
+          insight: `**${recipe.name}**${scaleNote} · ${macros}`,
+          decision: `Make ${recipe.name} using your ${ingredient}.`,
+          options: [
+            `Ingredients: ${ingList}`,
+            `Instructions:\n${steps}`,
+            groceryAdditions.length
+              ? `Missing (${groceryAdditions.length}): ${groceryAdditions.join(', ')}`
+              : `✅ You have everything needed!`,
+          ],
+          why: groceryAdditions.length
+            ? `${groceryAdditions.length} item${groceryAdditions.length>1?'s':''} missing from your pantry — tap below to add to grocery list.`
+            : `Your pantry covers all ingredients. Start cooking!`,
+          groceryAdditions,
+          scaledRecipeName: recipe.name,
+        };
+      }
+      case 'groceryAction': {
+        const items = shopList.filter(i=>!i.checked);
+        return {
+          insight: `Your grocery list: ${shopList.length} items (${items.length} unchecked).`,
+          decision: `Tell me what you want to add — or ask about a recipe and I'll add missing ingredients automatically.`,
+          options: items.slice(0,5).map(i=>i.name).concat(items.length>5?[`+${items.length-5} more items`]:[]),
+          why: `You can also say "I have [ingredient]" and LEVEL will find a recipe and add only what you're missing.`,
+        };
+      }
       case 'buildRoutine': {
         if (!state.hasCustomRoutines) {
           return {
@@ -1804,7 +2016,7 @@ Write a 4-sentence weekly review: 1) What went well (cite a specific number), 2)
       const state    = buildUserState();
       const intent   = parseIntent(msg);
       const rules    = runRules(intent, state);
-      const decision = makeDecision(intent, rules, state);
+      const decision = makeDecision(intent, rules, state, msg);
       let   response = formatDecision(decision);
       // AI explanation layer — only for complex/open-ended questions
       const needsAI  = ['general','recovery','adjust','progress'].includes(intent) || msg.split(' ').length > 6;
@@ -1815,7 +2027,7 @@ Write a 4-sentence weekly review: 1) What went well (cite a specific number), 2)
           if (ai?.trim()) response += `\n\n💬 ${ai.trim()}`;
         } catch(e) { /* AI is optional — never break the response */ }
       }
-      setLevelMsgs(p => [...p, { role:'level', text:response, ts:Date.now(), cta: decision.cta || null }]);
+      setLevelMsgs(p => [...p, { role:'level', text:response, ts:Date.now(), cta: decision.cta||null, groceryAdditions: decision.groceryAdditions||null, scaledRecipeName: decision.scaledRecipeName||null }]);
     } catch(e) {
       setLevelMsgs(p => [...p, { role:'level', text:`System error. Check your data and try again.`, ts:Date.now() }]);
     } finally {
@@ -1929,6 +2141,24 @@ Write a 4-sentence weekly review: 1) What went well (cite a specific number), 2)
                           }}
                           style={{ marginTop:10, width:'100%', padding:'9px 14px', borderRadius:10, border:'1px solid rgba(168,85,247,0.5)', background:'rgba(168,85,247,0.15)', color:'#A855F7', fontFamily:"'Oswald',sans-serif", fontSize:13, fontWeight:700, cursor:'pointer', letterSpacing:0.5 }}>
                           🏗️ OPEN ROUTINE BUILDER
+                        </button>
+                      )}
+                      {m.groceryAdditions?.length > 0 && (
+                        <button
+                          onClick={() => {
+                            const toAdd = m.groceryAdditions
+                              .filter(Boolean)
+                              .map(name => ({ id:Date.now()+Math.random(), name:name.trim(), checked:false, estCost:2 }));
+                            setShopList(prev => {
+                              const existingLC = prev.map(i=>i.name.toLowerCase());
+                              const fresh = toAdd.filter(i => !existingLC.includes(i.name.toLowerCase()));
+                              if (!fresh.length) { showToast('Already on your list ✓', 'info'); return prev; }
+                              showToast(`Added ${fresh.length} item${fresh.length>1?'s':''} to grocery list ✓`, 'success');
+                              return [...prev, ...fresh];
+                            });
+                          }}
+                          style={{ marginTop:8, width:'100%', padding:'9px 14px', borderRadius:10, border:'1px solid rgba(245,200,66,0.4)', background:'rgba(245,200,66,0.1)', color:'#F5C842', fontFamily:"'Oswald',sans-serif", fontSize:13, fontWeight:700, cursor:'pointer', letterSpacing:0.5 }}>
+                          🛒 ADD {m.groceryAdditions.length} ITEM{m.groceryAdditions.length>1?'S':''} TO GROCERY LIST
                         </button>
                       )}
                     </div>
@@ -2217,7 +2447,7 @@ Write a 4-sentence weekly review: 1) What went well (cite a specific number), 2)
     ).join('\n');
     const overload = computeProgressiveOverload();
     const msg = await callClaude([{ role: 'user', content:
-      `You are an expert personal trainer coaching Drew (240lb male, 22yo, ${goal.label} goal — ${goal.desc}, trains at Planet Fitness).\n\nRecent workouts:\n${summary}\n\nAlgorithm flags:\n${overload.map(i => `[${i.type.toUpperCase()}] ${i.exercise}: ${i.msg}`).join('\n') || 'None'}\n\nGive 4-5 specific, actionable coaching points. Focus on progressive overload opportunities, weak points, recovery, and technique cues. Be direct and motivating. Use numbered points.`
+      `You are an expert personal trainer coaching ${userName||'this athlete'} (${profile.weight?profile.weight+'lb ':''}${profile.sex||''}${profile.age?', '+profile.age+'yo':''}, ${goal.label} goal — ${goal.desc}).\n\nRecent workouts:\n${summary}\n\nAlgorithm flags:\n${overload.map(i => `[${i.type.toUpperCase()}] ${i.exercise}: ${i.msg}`).join('\n') || 'None'}\n\nGive 4-5 specific, actionable coaching points. Focus on progressive overload opportunities, weak points, recovery, and technique cues. Be direct and motivating. Use numbered points.`
     }], 900, 'claude-sonnet-4-6');
     if (msg) setCoachText(msg);
     setCoachLoading(false);
@@ -2535,7 +2765,7 @@ Write a 4-sentence weekly review: 1) What went well (cite a specific number), 2)
 
   /* ── Obsidian Export ── */
   function generateDailyLog() {
-    return `# Daily Log — ${todayStr()}\n\n## Nutrition\n- **Calories:** ${fmt(todayCal)} / ${goal.cal}\n- **Protein:** ${fmt(todayPro)}g / ${goal.protein}g\n- **Carbs:** ${fmt(todayCarb)}g / ${goal.carbs}g\n- **Fat:** ${fmt(todayFat)}g / ${goal.fat}g\n\n## Food Entries\n${entries.map(e => `- ${e.time} — **${e.name}**: ${e.cal} cal · ${e.protein}g P · ${e.carbs}g C · ${e.fat}g F${e.recipeCost ? ` · $${e.recipeCost.toFixed(2)}` : ''}`).join('\n') || '- No entries'}\n\n## Goal: ${goal.emoji} ${goal.label}\n> ${goal.desc}\n\n---\n*Exported from Drew's Fitness Hub*\n`;
+    return `# Daily Log — ${todayStr()}\n\n## Nutrition\n- **Calories:** ${fmt(todayCal)} / ${goal.cal}\n- **Protein:** ${fmt(todayPro)}g / ${goal.protein}g\n- **Carbs:** ${fmt(todayCarb)}g / ${goal.carbs}g\n- **Fat:** ${fmt(todayFat)}g / ${goal.fat}g\n\n## Food Entries\n${entries.map(e => `- ${e.time} — **${e.name}**: ${e.cal} cal · ${e.protein}g P · ${e.carbs}g C · ${e.fat}g F${e.recipeCost ? ` · $${e.recipeCost.toFixed(2)}` : ''}`).join('\n') || '- No entries'}\n\n## Goal: ${goal.emoji} ${goal.label}\n> ${goal.desc}\n\n---\n*Exported from Level Up Fitness*\n`;
   }
 
   function generateWorkoutMd(session) {
@@ -2543,7 +2773,7 @@ Write a 4-sentence weekly review: 1) What went well (cite a specific number), 2)
       const sets = (ex.sets || []).map((s, i) => `  - Set ${i + 1}: ${s.weight || 0} lb x ${s.reps || 0} reps`).join('\n');
       return `### ${ex.name}\n${sets}`;
     }).join('\n\n');
-    return `# Workout — ${session.date}\n**${session.workout}**\nDuration: ${Math.floor((session.duration || 0) / 60)}m ${(session.duration || 0) % 60}s\n\n${lines}\n\n---\n*Logged in Drew's Fitness Hub*\n`;
+    return `# Workout — ${session.date}\n**${session.workout}**\nDuration: ${Math.floor((session.duration || 0) / 60)}m ${(session.duration || 0) % 60}s\n\n${lines}\n\n---\n*Logged in Level Up Fitness*\n`;
   }
 
   const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
@@ -2617,7 +2847,7 @@ Write a 4-sentence weekly review: 1) What went well (cite a specific number), 2)
       <div style={{ flex: 1, overflowY: 'auto', padding: '16px 16px 0' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
           <div>
-            <div style={{ fontFamily: "'Bebas Neue',sans-serif", fontSize: 26, color: '#fff', lineHeight: 1 }}>{userName ? `${userName.toUpperCase()}'S HUB` : "MY HUB"}</div>
+            <div style={{ fontFamily: "'Bebas Neue',sans-serif", fontSize: 26, color: '#fff', lineHeight: 1 }}>LEVEL UP FITNESS</div>
             <div style={{ fontSize: 11, color: '#4a6a7a', letterSpacing: 1 }}>
               {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' }).toUpperCase()}
             </div>
@@ -4122,7 +4352,7 @@ Write a 4-sentence weekly review: 1) What went well (cite a specific number), 2)
         {/* Hero header */}
         <div style={{ background: `linear-gradient(160deg,${accentColor}22 0%,#0c0c18 80%)`, padding: 'max(env(safe-area-inset-top),20px) 20px 0', flexShrink: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
-            <div style={{ fontFamily: "'Bebas Neue',sans-serif", fontSize: 11, letterSpacing: 4, color: '#3a5a6a' }}>MY HUB</div>
+            <div style={{ fontFamily: "'Bebas Neue',sans-serif", fontSize: 11, letterSpacing: 4, color: '#3a5a6a' }}>LEVEL UP FITNESS</div>
             <button onClick={() => editMode ? saveProfile() : setEditMode(true)} style={{ padding: '7px 16px', borderRadius: 20, border: `1px solid ${editMode ? accentColor : 'rgba(255,255,255,0.12)'}`, background: editMode ? `${accentColor}22` : 'transparent', color: editMode ? accentColor : '#aaa', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
               {editMode ? '✓ SAVE' : '✏️ EDIT'}
             </button>
@@ -4604,7 +4834,7 @@ Write a 4-sentence weekly review: 1) What went well (cite a specific number), 2)
               <div style={{ display: 'flex', gap: 10, background: 'rgba(255,255,255,0.03)', borderRadius: 14, padding: 14, border: '1px solid rgba(255,255,255,0.06)', alignItems: 'center' }}>
                 <span style={{ fontSize: 22 }}>{userAvatar}</span>
                 <div>
-                  <div style={{ fontFamily: "'Oswald',sans-serif", fontSize: 16, fontWeight: 700, color: accentColor }}>{userName ? `${userName}'s Hub` : "My Hub"}</div>
+                  <div style={{ fontFamily: "'Oswald',sans-serif", fontSize: 16, fontWeight: 700, color: accentColor }}>Level Up Fitness</div>
                   <div style={{ fontSize: 11, color: '#4a6a7a' }}>Shown on your home screen</div>
                 </div>
               </div>
@@ -5313,7 +5543,7 @@ Include 5-7 exercises. No explanation, just JSON.`;
 
 /* ── SERVICE WORKER ── */
 if ('serviceWorker' in navigator) {
-  const sw = `const C='drews-hub-v26';self.addEventListener('install',e=>{e.waitUntil(caches.open(C).then(c=>c.addAll(['.'])));self.skipWaiting();});self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==C).map(k=>caches.delete(k)))));self.clients.claim();});self.addEventListener('fetch',e=>{if(e.request.method!=='GET')return;const u=e.request.url;if(u.includes('api.anthropic.com')||u.includes('openfoodfacts')||u.includes('themealdb')||u.includes('fonts.googleapis')||u.includes('cdnjs')||u.includes('supabase.co'))return;e.respondWith(caches.match(e.request).then(r=>r||fetch(e.request).then(res=>{if(res&&res.ok){const cl=res.clone();caches.open(C).then(c=>c.put(e.request,cl));}return res;})));});`;
+  const sw = `const C='drews-hub-v27';self.addEventListener('install',e=>{e.waitUntil(caches.open(C).then(c=>c.addAll(['.'])));self.skipWaiting();});self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==C).map(k=>caches.delete(k)))));self.clients.claim();});self.addEventListener('fetch',e=>{if(e.request.method!=='GET')return;const u=e.request.url;if(u.includes('api.anthropic.com')||u.includes('openfoodfacts')||u.includes('themealdb')||u.includes('fonts.googleapis')||u.includes('cdnjs')||u.includes('supabase.co'))return;e.respondWith(caches.match(e.request).then(r=>r||fetch(e.request).then(res=>{if(res&&res.ok){const cl=res.clone();caches.open(C).then(c=>c.put(e.request,cl));}return res;})));});`;
   try { navigator.serviceWorker.register(URL.createObjectURL(new Blob([sw], { type: 'application/javascript' }))).catch(() => {}); } catch {}
 }
 
