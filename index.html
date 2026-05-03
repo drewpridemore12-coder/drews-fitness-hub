@@ -906,11 +906,14 @@ function FitnessHub() {
   const [earnedBadges, setEarnedBadges] = useState(() => load('earnedBadges', []));
   /* ── auth ── */
   const [currentUser,  setCurrentUser]  = useState(null);
+  const [userPlan,     setUserPlan]     = useState('free');
   const [showAuth,     setShowAuth]     = useState(false);
+  const [showPaywall,  setShowPaywall]  = useState(false);
   const [authMode,     setAuthMode]     = useState('signin');
   const [authEmail,    setAuthEmail]    = useState('');
   const [authPassword, setAuthPassword] = useState('');
   const [authLoading,  setAuthLoading]  = useState(false);
+  const [upgradeLoading, setUpgradeLoading] = useState('');
 
   /* ── food logger ── */
   const [logItem,     setLogItem]     = useState('');
@@ -1028,6 +1031,11 @@ function FitnessHub() {
   const [fbSubmitting,  setFbSubmitting]  = useState(false);
   const [fbDone,        setFbDone]        = useState(false);
 
+  /* ── Cloud sync ── */
+  const [isSyncing,      setIsSyncing]      = useState(false);
+  const [lastCloudSync,  setLastCloudSync]  = useState(null);
+  const syncTimerRef = useRef(null);
+
   /* ── Admin feedback panel ── */
   const [adminFeedback,        setAdminFeedback]        = useState([]);
   const [adminFeedbackLoading, setAdminFeedbackLoading] = useState(false);
@@ -1110,6 +1118,25 @@ function FitnessHub() {
       window.removeEventListener('beforeunload', forceSave);
     };
   }, [vault, shopList, checkIns, mealPlan, userXP, levelMsgs, customRoutines, userMemory]);
+
+  /* ── Debounced cloud sync: push 5s after any data change (signed-in only) ── */
+  useEffect(() => {
+    if (!currentUser || !_sb) return;
+    if (syncTimerRef.current) clearTimeout(syncTimerRef.current);
+    syncTimerRef.current = setTimeout(pushCloudSync, 5000);
+    return () => clearTimeout(syncTimerRef.current);
+  }, [vault, shopList, checkIns, mealPlan, userXP, customRoutines, saved, pantry,
+      weightLog, earnedBadges, levelMsgs, userMemory, entries,
+      userName, userGoal, userWeight, userHeight, userAge, accentColor]);
+
+  /* ── Pull from cloud when app comes back to foreground (signed-in) ── */
+  useEffect(() => {
+    if (!currentUser) return;
+    const onFocus = () => { if (document.visibilityState === 'visible') pullCloudSync(currentUser); };
+    document.addEventListener('visibilitychange', onFocus);
+    return () => document.removeEventListener('visibilitychange', onFocus);
+  }, [currentUser]);
+
   /* sync settings staging state whenever the modal opens */
   useEffect(() => {
     if (showSettings) { setSKey(apiKey); setSUrl(vercelUrl); setSBudget(String(weekBudget)); setSVaultName(vaultName); }
@@ -1204,13 +1231,23 @@ function FitnessHub() {
   useEffect(() => {
     if (!_sb) return;
     _sb.auth.getSession().then(({ data: { session } }) => {
-      if (session?.user) setCurrentUser(session.user);
+      if (session?.user) { setCurrentUser(session.user); fetchUserPlan(session.user.id); }
     });
     const { data: { subscription } } = _sb.auth.onAuthStateChange((event, session) => {
       setCurrentUser(session ? session.user : null);
-      if (event === 'SIGNED_IN' && session) syncProfileToSupabase(session.user);
-      if (event === 'SIGNED_OUT') showToast('Signed out', 'success');
+      if (event === 'SIGNED_IN' && session) {
+        syncProfileToSupabase(session.user);
+        pullCloudSync(session.user);
+        fetchUserPlan(session.user.id);
+      }
+      if (event === 'SIGNED_OUT') { showToast('Signed out', 'success'); setUserPlan('free'); }
     });
+    // Handle return from Stripe checkout
+    if (window.location.search.includes('upgraded=1')) {
+      showToast('🎉 Upgrade successful! Refreshing plan…', 'success');
+      history.replaceState(null, '', window.location.pathname);
+      setTimeout(() => { if (_sb) _sb.auth.getSession().then(({ data: { session } }) => { if (session?.user) fetchUserPlan(session.user.id); }); }, 2000);
+    }
     return () => subscription?.unsubscribe();
   }, []);
 
@@ -2444,7 +2481,7 @@ Write a 4-sentence weekly review: 1) What went well (cite a specific number), 2)
         if (extra.textBlock) return (data?.content || []).find(b => b.type === 'text') || null;
         return data?.content?.[0]?.text || null;
       } catch(e) {
-        if (e?.context?.status === 402) { showToast('Daily AI limit reached — upgrade for more 🚀', 'error'); return null; }
+        if (e?.context?.status === 402) { setShowPaywall(true); return null; }
         // Fall through to direct key if edge function unavailable
       }
     }
@@ -4456,6 +4493,94 @@ Write a 4-sentence weekly review: 1) What went well (cite a specific number), 2)
   }
 
   /* ── Supabase auth helpers ── */
+  /* ── Gather all state into one sync blob ── */
+  function gatherSyncData() {
+    const entriesMap = {};
+    for (let i = 0; i < 30; i++) {
+      const d = new Date(); d.setDate(d.getDate() - i);
+      const ds = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+      const dayEntries = load('entries_' + ds, []);
+      if (dayEntries.length) entriesMap[ds] = dayEntries;
+    }
+    return {
+      v: 2, ts: new Date().toISOString(),
+      vault, shopList, checkIns, mealPlan, userXP,
+      customRoutines, saved, pantry, weightLog, earnedBadges,
+      levelMsgs: levelMsgs.slice(-50),
+      userMemory, entries: entriesMap,
+      userName, userAge, userWeight, userHeight, userSex,
+      activityLevel, userGoal, weekBudget: Number(weekBudget),
+      accentColor, userAvatar, userBio, customGoalCal, customGoalProtein,
+      adjustDismissed,
+    };
+  }
+
+  /* ── Push all state to Supabase ── */
+  async function pushCloudSync() {
+    if (!_sb || !currentUser) return;
+    setIsSyncing(true);
+    try {
+      const syncData = gatherSyncData();
+      await _sb.from('profiles').upsert({
+        id: currentUser.id,
+        email: currentUser.email,
+        sync_data: syncData,
+        synced_at: syncData.ts,
+        updated_at: syncData.ts,
+      }, { onConflict: 'id' });
+      setLastCloudSync(new Date());
+    } catch(e) { console.warn('[SYNC] Push failed', e); }
+    setIsSyncing(false);
+  }
+
+  /* ── Pull state from Supabase and restore ── */
+  async function pullCloudSync(user) {
+    if (!_sb || !user) return;
+    setIsSyncing(true);
+    try {
+      const { data, error } = await _sb.from('profiles').select('sync_data, synced_at').eq('id', user.id).single();
+      if (error || !data?.sync_data) { setIsSyncing(false); return; }
+      const d = data.sync_data;
+      if (!d || d.v < 2) { setIsSyncing(false); return; }
+      // Restore all state — only overwrite if cloud data has content
+      if (d.vault?.length)              { setVault(d.vault);               save('workoutVault', d.vault); }
+      if (d.shopList?.length)           { setShopList(d.shopList);         save('shopList', d.shopList); }
+      if (d.checkIns?.length)           { setCheckIns(d.checkIns);         save('checkIns', d.checkIns); }
+      if (d.mealPlan && Object.keys(d.mealPlan).length) { setMealPlan(d.mealPlan); save('mealPlan', d.mealPlan); }
+      if (d.userXP > 0)                 { setUserXP(d.userXP);             save('userXP', d.userXP); }
+      if (d.customRoutines?.length)     { setCustomRoutines(d.customRoutines); save('customRoutines', d.customRoutines); }
+      if (d.saved?.length)              { setSaved(d.saved);               save('savedRecipes', d.saved); }
+      if (d.pantry?.length)             { setPantry(d.pantry);             save('pantry', d.pantry); }
+      if (d.weightLog?.length)          { setWeightLog(d.weightLog);       save('weightLog', d.weightLog); }
+      if (d.earnedBadges?.length)       { setEarnedBadges(d.earnedBadges); save('earnedBadges', d.earnedBadges); }
+      if (d.levelMsgs?.length)          { setLevelMsgs(d.levelMsgs);       save('levelMsgs', d.levelMsgs); }
+      if (d.userMemory)                 { setUserMemory(d.userMemory);     save('userMemory', d.userMemory); }
+      if (d.userName)                   { setUserName(d.userName);         save('userName', d.userName); }
+      if (d.userAge)                    { setUserAge(d.userAge);           save('userAge', d.userAge); }
+      if (d.userWeight)                 { setUserWeight(d.userWeight);     save('userWeight', d.userWeight); }
+      if (d.userHeight)                 { setUserHeight(d.userHeight);     save('userHeight', d.userHeight); }
+      if (d.userSex)                    { setUserSex(d.userSex);           save('userSex', d.userSex); }
+      if (d.activityLevel)              { setActivityLevel(d.activityLevel); save('activityLevel', d.activityLevel); }
+      if (d.userGoal)                   { setUserGoal(d.userGoal);         save('userGoal', d.userGoal); }
+      if (d.weekBudget)                 { setWeekBudget(d.weekBudget);     save('weekBudget', d.weekBudget); }
+      if (d.accentColor)                { setAccentColor(d.accentColor);   save('accentColor', d.accentColor); }
+      if (d.userAvatar)                 { setUserAvatar(d.userAvatar);     save('userAvatar', d.userAvatar); }
+      if (d.userBio)                    { setUserBio(d.userBio);           save('userBio', d.userBio); }
+      if (d.customGoalCal)              { setCustomGoalCal(d.customGoalCal); save('customGoalCal', d.customGoalCal); }
+      if (d.customGoalProtein)          { setCustomGoalProtein(d.customGoalProtein); save('customGoalProtein', d.customGoalProtein); }
+      if (d.adjustDismissed)            { setAdjustDismissed(d.adjustDismissed); save('adjustDismissed', d.adjustDismissed); }
+      // Restore food entries (last 30 days)
+      if (d.entries) {
+        Object.entries(d.entries).forEach(([ds, dayEntries]) => save('entries_' + ds, dayEntries));
+        const todayKey = todayStr();
+        if (d.entries[todayKey]) setEntries(d.entries[todayKey]);
+      }
+      setLastCloudSync(new Date(data.synced_at || d.ts));
+      showToast('☁️ Data synced from cloud', 'success');
+    } catch(e) { console.warn('[SYNC] Pull failed', e); }
+    setIsSyncing(false);
+  }
+
   async function syncProfileToSupabase(user) {
     if (!_sb || !user) return;
     try {
@@ -4475,6 +4600,32 @@ Write a 4-sentence weekly review: 1) What went well (cite a specific number), 2)
       }, { onConflict: 'id' });
       showToast('✓ Profile synced to cloud', 'success');
     } catch(e) { console.warn('Sync error', e); }
+  }
+
+  /* ── Stripe price IDs — replace with your actual IDs from Stripe dashboard ── */
+  const STRIPE_PRO_PRICE_ID   = 'price_1TSnf5A1uPzh0uBq8cZ9ZHFz';
+  const STRIPE_ELITE_PRICE_ID = 'price_1TSnfGA1uPzh0uBq6HbvDr1W';
+
+  async function fetchUserPlan(uid) {
+    if (!_sb || !uid) return;
+    try {
+      const { data } = await _sb.from('profiles').select('plan').eq('id', uid).maybeSingle();
+      setUserPlan(data?.plan ?? 'free');
+    } catch(e) { console.warn('fetchUserPlan error', e); }
+  }
+
+  async function handleUpgrade(tier) {
+    if (!_sb || !currentUser) { setShowAuth(true); return; }
+    setUpgradeLoading(tier);
+    try {
+      const priceId = tier === 'elite' ? STRIPE_ELITE_PRICE_ID : STRIPE_PRO_PRICE_ID;
+      const { data, error } = await _sb.functions.invoke('stripe-checkout', {
+        body: { priceId, successUrl: window.location.href.split('?')[0] + '?upgraded=1', cancelUrl: window.location.href.split('?')[0] }
+      });
+      if (error || !data?.url) { showToast('Checkout error — try again', 'error'); return; }
+      window.location.href = data.url;
+    } catch(e) { showToast('Network error', 'error'); }
+    setUpgradeLoading('');
   }
 
   async function handleSignIn() {
@@ -5079,7 +5230,13 @@ Write a 4-sentence weekly review: 1) What went well (cite a specific number), 2)
                 <div style={{ fontSize: 11, color: currentUser ? '#4BDE80' : '#4A9EFF', fontWeight: 700, marginBottom: 6 }}>☁️ CLOUD ACCOUNT</div>
                 {currentUser ? (
                   <div>
-                    <div style={{ fontSize: 12, color: '#ddd', marginBottom: 10 }}>✓ Signed in as <span style={{ color: '#4BDE80' }}>{currentUser.email}</span></div>
+                    <div style={{ fontSize: 12, color: '#ddd', marginBottom: 6 }}>✓ Signed in as <span style={{ color: '#4BDE80' }}>{currentUser.email}</span></div>
+                    <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:10 }}>
+                      <span style={{ fontSize:11, fontWeight:700, padding:'3px 10px', borderRadius:20, background: userPlan==='elite' ? 'rgba(168,85,247,0.2)' : userPlan==='pro' ? 'rgba(75,222,128,0.15)' : 'rgba(255,255,255,0.06)', color: userPlan==='elite' ? '#a855f7' : userPlan==='pro' ? '#4BDE80' : '#4a6a7a', border:`1px solid ${userPlan==='elite'?'rgba(168,85,247,0.4)':userPlan==='pro'?'rgba(75,222,128,0.3)':'rgba(255,255,255,0.08)'}` }}>
+                        {userPlan==='elite' ? '⚡ ELITE' : userPlan==='pro' ? '⭐ PRO' : '🆓 FREE'}
+                      </span>
+                      {userPlan === 'free' && <button onClick={() => setShowPaywall(true)} style={{ fontSize:11, padding:'3px 10px', borderRadius:20, border:'1px solid rgba(75,222,128,0.4)', background:'rgba(75,222,128,0.1)', color:'#4BDE80', fontWeight:700, cursor:'pointer' }}>UPGRADE ↑</button>}
+                    </div>
                     <div style={{ display: 'flex', gap: 8 }}>
                       <button onClick={() => syncProfileToSupabase(currentUser)} style={{ flex: 1, padding: '9px 8px', borderRadius: 10, border: '1px solid rgba(75,222,128,0.3)', background: 'rgba(75,222,128,0.1)', color: '#4BDE80', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>⬆ SYNC NOW</button>
                       <button onClick={handleSignOut} style={{ flex: 1, padding: '9px 8px', borderRadius: 10, border: '1px solid rgba(255,80,80,0.3)', background: 'rgba(255,80,80,0.08)', color: '#ff6b6b', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>SIGN OUT</button>
@@ -5100,7 +5257,7 @@ Write a 4-sentence weekly review: 1) What went well (cite a specific number), 2)
                 </div>
                 <div style={{ fontSize:10, color:'#555', lineHeight:1.5 }}>
                   {_sb
-                    ? 'All AI features run on LEVEL\'s servers — nothing to configure. Free tier: 15 AI uses per day.'
+                    ? `All AI features run on LEVEL's servers. ${userPlan==='elite'?'Elite: unlimited AI calls.':userPlan==='pro'?'Pro: 100 AI calls/day.':'Free tier: 15 AI calls/day — upgrade for more.'}`
                     : 'Sign in above to enable LEVEL AI, meal planning, food lookup, coaching, and more. Free — no credit card.'}
                 </div>
               </div>
@@ -5752,6 +5909,53 @@ Include 5-7 exercises. No explanation, just JSON.`;
       {showBarcode && <BarcodeScanner onScan={handleBarcodeScan} onClose={() => setShowBarcode(false)} />}
       {showSettings && SettingsModal()}
       {showAuth && AuthModal()}
+
+      {/* ── PAYWALL MODAL ── */}
+      {showPaywall && (
+        <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.92)', zIndex:900, display:'flex', alignItems:'flex-end', justifyContent:'center', padding:'0 0 0 0' }}>
+          <div className="pop" style={{ width:'100%', maxWidth:480, background:'#0e1120', borderRadius:'24px 24px 0 0', padding:'28px 20px 36px', border:'1px solid rgba(255,255,255,0.08)', maxHeight:'90vh', overflowY:'auto' }}>
+            <div style={{ textAlign:'center', marginBottom:22 }}>
+              <div style={{ fontSize:40, marginBottom:8 }}>⚡</div>
+              <div style={{ fontFamily:"'Oswald',sans-serif", fontSize:22, fontWeight:800, color:'#fff', marginBottom:6 }}>Daily AI Limit Reached</div>
+              <div style={{ fontSize:13, color:'#4a6a7a' }}>Upgrade for more AI calls, better models, and no ads.</div>
+            </div>
+
+            {/* Plan comparison */}
+            {[
+              { tier:'free',  label:'Free',  price:'$0',     calls:'15/day',  features:['Basic AI (Haiku)', 'Food lookup', 'Recipe gen'], color:'#4a6a7a', current: userPlan==='free' },
+              { tier:'pro',   label:'Pro',   price:'$9.99',  calls:'100/day', features:['All models', 'Meal planning', 'No ads', 'Cloud sync priority'], color:'#4BDE80', current: userPlan==='pro' },
+              { tier:'elite', label:'Elite', price:'$19.99', calls:'Unlimited',features:['Everything in Pro', 'Claude Sonnet coaching', 'Advanced analytics', 'Early access'], color:'#a855f7', current: userPlan==='elite' },
+            ].map(p => (
+              <div key={p.tier} style={{ background: p.current ? `${p.color}12` : 'rgba(255,255,255,0.03)', borderRadius:16, padding:'16px 18px', marginBottom:10, border:`1px solid ${p.current ? p.color+'50' : 'rgba(255,255,255,0.06)'}` }}>
+                <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:8 }}>
+                  <div>
+                    <span style={{ fontFamily:"'Oswald',sans-serif", fontSize:17, fontWeight:700, color:p.color }}>{p.label}</span>
+                    {p.current && <span style={{ marginLeft:8, fontSize:10, color:p.color, fontWeight:700, background:`${p.color}20`, padding:'2px 8px', borderRadius:20 }}>CURRENT</span>}
+                  </div>
+                  <div style={{ textAlign:'right' }}>
+                    <span style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:20, color:'#fff' }}>{p.price}</span>
+                    <span style={{ fontSize:10, color:'#555' }}>/mo</span>
+                  </div>
+                </div>
+                <div style={{ fontSize:12, color:'#4a6a7a', marginBottom:10 }}>{p.calls} AI calls · {p.features.slice(0,2).join(' · ')}</div>
+                {!p.current && p.tier !== 'free' && (
+                  <button
+                    disabled={!!upgradeLoading}
+                    onClick={() => handleUpgrade(p.tier)}
+                    style={{ width:'100%', padding:'11px 0', borderRadius:12, border:'none', background: p.color, color:'#000', fontFamily:"'Oswald',sans-serif", fontSize:15, fontWeight:800, cursor:'pointer', letterSpacing:0.5, opacity: upgradeLoading ? 0.6 : 1 }}
+                  >
+                    {upgradeLoading === p.tier ? '⏳ LOADING…' : `UPGRADE TO ${p.label.toUpperCase()}`}
+                  </button>
+                )}
+              </div>
+            ))}
+
+            <button onClick={() => setShowPaywall(false)} style={{ width:'100%', marginTop:8, padding:13, borderRadius:14, border:'1px solid rgba(255,255,255,0.08)', background:'transparent', color:'#4a6a7a', fontFamily:"'Oswald',sans-serif", fontSize:14, fontWeight:700, cursor:'pointer' }}>
+              MAYBE LATER
+            </button>
+          </div>
+        </div>
+      )}
       {showCheckIn && DailyCheckInModal()}
       {showRoutineBuilder && RoutineBuilderModal()}
       {showBetaModal && BetaWelcomeModal()}
@@ -5814,7 +6018,7 @@ Include 5-7 exercises. No explanation, just JSON.`;
 
 /* ── SERVICE WORKER ── */
 if ('serviceWorker' in navigator) {
-  const sw = `const C='drews-hub-v29';self.addEventListener('install',e=>{e.waitUntil(caches.open(C).then(c=>c.addAll(['.'])));self.skipWaiting();});self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==C).map(k=>caches.delete(k)))));self.clients.claim();});self.addEventListener('fetch',e=>{if(e.request.method!=='GET')return;const u=e.request.url;if(u.includes('api.anthropic.com')||u.includes('openfoodfacts')||u.includes('themealdb')||u.includes('fonts.googleapis')||u.includes('cdnjs')||u.includes('supabase.co'))return;e.respondWith(caches.match(e.request).then(r=>r||fetch(e.request).then(res=>{if(res&&res.ok){const cl=res.clone();caches.open(C).then(c=>c.put(e.request,cl));}return res;})));});`;
+  const sw = `const C='drews-hub-v30';self.addEventListener('install',e=>{e.waitUntil(caches.open(C).then(c=>c.addAll(['.'])));self.skipWaiting();});self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==C).map(k=>caches.delete(k)))));self.clients.claim();});self.addEventListener('fetch',e=>{if(e.request.method!=='GET')return;const u=e.request.url;if(u.includes('api.anthropic.com')||u.includes('openfoodfacts')||u.includes('themealdb')||u.includes('fonts.googleapis')||u.includes('cdnjs')||u.includes('supabase.co'))return;e.respondWith(caches.match(e.request).then(r=>r||fetch(e.request).then(res=>{if(res&&res.ok){const cl=res.clone();caches.open(C).then(c=>c.put(e.request,cl));}return res;})));});`;
   try { navigator.serviceWorker.register(URL.createObjectURL(new Blob([sw], { type: 'application/javascript' }))).catch(() => {}); } catch {}
 }
 
