@@ -34,7 +34,9 @@ function initSupabase(url, key) {
   try {
     const u = url || localStorage.getItem('supabaseUrl') || SUPABASE_URL_DEFAULT;
     const k = key || localStorage.getItem('supabaseKey') || SUPABASE_KEY_DEFAULT;
-    if (u && k && window.supabase) _sb = window.supabase.createClient(u, k);
+    if (u && k && window.supabase) _sb = window.supabase.createClient(u, k, {
+      auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true, storage: window.localStorage }
+    });
   } catch(e) { console.warn('Supabase init failed', e); }
 }
 initSupabase();
@@ -1241,6 +1243,7 @@ function FitnessHub() {
         fetchUserPlan(session.user.id);
       }
       if (event === 'SIGNED_OUT') { showToast('Signed out', 'success'); setUserPlan('free'); }
+      if (event === 'PASSWORD_RECOVERY') { setShowAuth(true); setAuthMode('signin'); showToast('Enter your new password below', 'info'); }
     });
     // Handle return from Stripe checkout
     if (window.location.search.includes('upgraded=1')) {
@@ -3119,6 +3122,16 @@ Write a 4-sentence weekly review: 1) What went well (cite a specific number), 2)
           </div>
         </div>
 
+        {!currentUser && (
+          <div onClick={() => { setShowAuth(true); setAuthMode('signin'); }} style={{ background: 'rgba(74,158,255,0.08)', border: '1px solid rgba(74,158,255,0.25)', borderRadius: 14, padding: '11px 16px', marginBottom: 14, display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer' }}>
+            <div>
+              <div style={{ fontSize: 12, fontWeight: 700, color: '#4A9EFF', fontFamily: "'Oswald',sans-serif", letterSpacing: 0.5 }}>☁️ SIGN IN TO SYNC & SAVE</div>
+              <div style={{ fontSize: 10, color: '#4a6a7a', marginTop: 2 }}>Keep your progress safe across devices</div>
+            </div>
+            <div style={{ fontSize: 12, color: '#4A9EFF', fontWeight: 700 }}>→</div>
+          </div>
+        )}
+
         {hubWidgets.macros && (
           <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 20, padding: '18px 10px', border: '1px solid rgba(255,255,255,0.06)', marginBottom: 14 }}>
             <div style={{ display: 'flex', justifyContent: 'space-around', flexWrap: 'wrap', gap: 4 }}>
@@ -4647,7 +4660,17 @@ Write a 4-sentence weekly review: 1) What went well (cite a specific number), 2)
 
   async function handleGoogleAuth() {
     if (!_sb) return showToast('Supabase not configured', 'error');
-    await _sb.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: window.location.href } });
+    await _sb.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: window.location.origin + window.location.pathname } });
+  }
+
+  async function handleForgotPassword() {
+    if (!_sb) return showToast('Supabase not configured', 'error');
+    if (!authEmail) return showToast('Enter your email first', 'error');
+    setAuthLoading(true);
+    const { error } = await _sb.auth.resetPasswordForEmail(authEmail, { redirectTo: window.location.origin + window.location.pathname });
+    setAuthLoading(false);
+    if (error) showToast(error.message, 'error');
+    else showToast('Password reset email sent!', 'success');
   }
 
   async function handleSignOut() {
@@ -5523,6 +5546,14 @@ Write a 4-sentence weekly review: 1) What went well (cite a specific number), 2)
             {authLoading ? '…' : authMode === 'signin' ? 'SIGN IN' : 'CREATE ACCOUNT'}
           </button>
 
+          {authMode === 'signin' && (
+            <div style={{ textAlign: 'center', marginBottom: 12 }}>
+              <button onClick={handleForgotPassword} style={{ background: 'none', border: 'none', color: '#4A9EFF', fontSize: 12, cursor: 'pointer', fontFamily: 'inherit', textDecoration: 'underline' }}>
+                Forgot password?
+              </button>
+            </div>
+          )}
+
           <button onClick={handleGoogleAuth} style={{ width: '100%', padding: 14, borderRadius: 14, border: '1px solid rgba(255,255,255,0.12)', background: 'rgba(255,255,255,0.04)', color: '#fff', fontFamily: "'Oswald',sans-serif", fontSize: 16, fontWeight: 700, cursor: 'pointer', letterSpacing: 0.5, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10 }}>
             <span style={{ fontSize: 18 }}>G</span> CONTINUE WITH GOOGLE
           </button>
@@ -5880,7 +5911,7 @@ Include 5-7 exercises. No explanation, just JSON.`;
         {NAV.map(({ id, icon, label }) => {
           const active = screen === id;
           return (
-            <button key={id} onClick={() => setScreen(id)} style={{ flex: 1, padding: '8px 2px', border: 'none', background: 'transparent', color: active ? accentColor : '#3a4a5a', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, transition: 'color 0.15s', position: 'relative' }}>
+            <button key={id} onClick={() => { if (id === 'profile' && !currentUser) { setShowAuth(true); setAuthMode('signin'); return; } setScreen(id); }} style={{ flex: 1, padding: '8px 2px', border: 'none', background: 'transparent', color: active ? accentColor : '#3a4a5a', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, transition: 'color 0.15s', position: 'relative' }}>
               {id === 'profile'
                 ? <span style={{ fontSize: 18, lineHeight: 1, filter: active ? 'none' : 'grayscale(1) opacity(0.4)' }}>{icon}</span>
                 : <span style={{ fontSize: 18, lineHeight: 1 }}>{icon}</span>}
@@ -6018,7 +6049,7 @@ Include 5-7 exercises. No explanation, just JSON.`;
 
 /* ── SERVICE WORKER ── */
 if ('serviceWorker' in navigator) {
-  const sw = `const C='drews-hub-v30';self.addEventListener('install',e=>{e.waitUntil(caches.open(C).then(c=>c.addAll(['.'])));self.skipWaiting();});self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==C).map(k=>caches.delete(k)))));self.clients.claim();});self.addEventListener('fetch',e=>{if(e.request.method!=='GET')return;const u=e.request.url;if(u.includes('api.anthropic.com')||u.includes('openfoodfacts')||u.includes('themealdb')||u.includes('fonts.googleapis')||u.includes('cdnjs')||u.includes('supabase.co'))return;e.respondWith(caches.match(e.request).then(r=>r||fetch(e.request).then(res=>{if(res&&res.ok){const cl=res.clone();caches.open(C).then(c=>c.put(e.request,cl));}return res;})));});`;
+  const sw = `const C='drews-hub-v31';self.addEventListener('install',e=>{e.waitUntil(caches.open(C).then(c=>c.addAll(['.'])));self.skipWaiting();});self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==C).map(k=>caches.delete(k)))));self.clients.claim();});self.addEventListener('fetch',e=>{if(e.request.method!=='GET')return;const u=e.request.url;if(u.includes('api.anthropic.com')||u.includes('openfoodfacts')||u.includes('themealdb')||u.includes('fonts.googleapis')||u.includes('cdnjs')||u.includes('supabase.co'))return;e.respondWith(caches.match(e.request).then(r=>r||fetch(e.request).then(res=>{if(res&&res.ok){const cl=res.clone();caches.open(C).then(c=>c.put(e.request,cl));}return res;})));});`;
   try { navigator.serviceWorker.register(URL.createObjectURL(new Blob([sw], { type: 'application/javascript' }))).catch(() => {}); } catch {}
 }
 
