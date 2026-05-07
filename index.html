@@ -61,52 +61,103 @@ const GOAL_PRESETS = {
 
 /* ── DYNAMIC CALORIE ENGINE (Mifflin-St Jeor) ── */
 const ACTIVITY_FACTORS = {
-  sedentary: 1.2,    // desk job, little/no exercise
-  light:     1.375,  // light exercise 1–3 days/wk
-  moderate:  1.55,   // moderate exercise 3–5 days/wk
-  active:    1.725,  // hard exercise 6–7 days/wk
-  very:      1.9,    // very hard exercise + physical job
+  sedentary:   1.2,    // desk job, little/no exercise
+  light:       1.375,  // light movement 1-3 days/wk
+  moderate:    1.55,   // moderate movement 3-5 days/wk
+  active:      1.725,  // hard exercise 6-7 days/wk
+  very:        1.9,    // legacy key: very hard exercise + physical job
+  very_active: 1.9,    // new key: very hard exercise + physical job
 };
-const GOAL_ADJUSTMENTS = { cut: -500, recomp: 0, bulk: 300, strength: 200 };
-const PROTEIN_PER_LB   = { cut: 1.0, recomp: 0.9, bulk: 0.8, strength: 0.9 };
+const GOAL_ADJUSTMENTS = {
+  cut: -500, lose: -500,
+  maintain: 0,
+  recomp: -200,
+  bulk: 300, gain: 300,
+  strength: 200,
+};
+const GOAL_ALIASES = { lose:'cut', maintain:'recomp', gain:'bulk' };
+
+function normalizeGoalKey(goalKey) {
+  return GOAL_ALIASES[goalKey] || goalKey || 'recomp';
+}
 
 function parseHeightToCm(h) {
   if (!h) return null;
-  // handles formats: 5'11", 5'11, 5 11, 511, 71 (total inches), 180cm
-  const cmMatch = String(h).match(/(\d+\.?\d*)\s*cm/i);
+  const raw = String(h).trim().toLowerCase();
+  const cmMatch = raw.match(/(\d+\.?\d*)\s*cm/);
   if (cmMatch) return parseFloat(cmMatch[1]);
-  const ftIn = String(h).match(/^(\d+)['''′\s](\d+)/);
+  const meterMatch = raw.match(/(\d+\.?\d*)\s*m$/);
+  if (meterMatch) return parseFloat(meterMatch[1]) * 100;
+  const ftWords = raw.match(/(\d+)\s*(?:ft|foot|feet)\s*(\d+)?/);
+  if (ftWords) return parseInt(ftWords[1]) * 30.48 + (parseInt(ftWords[2] || '0') * 2.54);
+  const ftIn = raw.match(/^(\d+)[''′\s](\d+)/);
   if (ftIn) return parseInt(ftIn[1]) * 30.48 + parseInt(ftIn[2]) * 2.54;
-  const ftOnly = String(h).match(/^(\d+)['''′]?$/);
+  const inches = raw.match(/(\d+\.?\d*)\s*(?:in|inch|inches|")/);
+  if (inches) return parseFloat(inches[1]) * 2.54;
+  const ftOnly = raw.match(/^(\d+)[''′]?$/);
   if (ftOnly) {
     const n = parseInt(ftOnly[1]);
-    // if > 8 treat as total inches, otherwise feet
     return n > 8 ? n * 2.54 : n * 30.48;
   }
   return null;
 }
 
+function parseWeightToLbs(w) {
+  if (!w) return null;
+  const raw = String(w).trim().toLowerCase();
+  const kgMatch = raw.match(/(\d+\.?\d*)\s*(?:kg|kgs|kilogram|kilograms)/);
+  if (kgMatch) return parseFloat(kgMatch[1]) * 2.2046;
+  const lbMatch = raw.match(/(\d+\.?\d*)\s*(?:lb|lbs|pound|pounds)/);
+  if (lbMatch) return parseFloat(lbMatch[1]);
+  const n = parseFloat(raw.replace(/[^\d.]/g, ''));
+  return Number.isFinite(n) ? n : null;
+}
+
+function computeMacros(state) {
+  const sex = (state.userSex || state.sex || 'male') === 'female' ? 'female' : 'male';
+  const age = parseFloat(state.userAge ?? state.age);
+  const weightLbs = parseWeightToLbs(state.userWeight ?? state.weight ?? state.weightLbs);
+  const heightCm = parseHeightToCm(state.userHeight ?? state.height ?? state.heightText);
+  const activityKey = state.activityLevel || state.activity || 'moderate';
+  const multiplier = ACTIVITY_FACTORS[activityKey] || ACTIVITY_FACTORS.moderate;
+  const goalKey = normalizeGoalKey(state.userGoal || state.goalKey || state.goal);
+  const preset = GOAL_PRESETS[goalKey] || GOAL_PRESETS.recomp;
+  if (!age || !weightLbs || !heightCm || age < 10 || weightLbs < 60 || heightCm < 100) return null;
+
+  const weightKg = weightLbs / 2.2046;
+  const bmrRaw = sex === 'female'
+    ? (10 * weightKg) + (6.25 * heightCm) - (5 * age) - 161
+    : (10 * weightKg) + (6.25 * heightCm) - (5 * age) + 5;
+  const bmr = Math.round(bmrRaw);
+  const tdee = Math.round(bmrRaw * multiplier);
+  const adjustment = GOAL_ADJUSTMENTS[state.userGoal || state.goalKey || state.goal] ?? GOAL_ADJUSTMENTS[goalKey] ?? 0;
+  const target_cal = Math.max(1200, Math.round(tdee + adjustment));
+  const protein_g = Math.min(250, Math.round(weightLbs * 1.0));
+  const fat_g = Math.max(20, Math.round(target_cal * 0.25 / 9));
+  const carb_g = Math.max(50, Math.round((target_cal - protein_g * 4 - fat_g * 9) / 4));
+  const basis = 'Mifflin-St Jeor · activity x' + multiplier + ' · goal ' + (adjustment >= 0 ? '+' : '') + adjustment + ' kcal';
+
+  return {
+    ...preset,
+    cal: target_cal,
+    protein: protein_g,
+    carbs: carb_g,
+    fat: fat_g,
+    target_cal,
+    protein_g,
+    carb_g,
+    fat_g,
+    bmr,
+    tdee,
+    multiplier,
+    adjustment,
+    basis,
+    dynamic: true,
+  };
+}
+
 function computeDynamicGoal(sex, age, weightLbs, heightText, activity, goalKey) {
-  const kg = parseFloat(weightLbs) / 2.2046;
-  const cm = parseHeightToCm(heightText);
-  const a  = parseFloat(age);
-  const af = ACTIVITY_FACTORS[activity] || ACTIVITY_FACTORS.moderate;
-  if (!kg || !cm || !a || kg < 30 || cm < 100 || a < 10) return null;
-  // Mifflin-St Jeor BMR
-  const bmr = sex === 'female'
-    ? (10 * kg) + (6.25 * cm) - (5 * a) - 161
-    : (10 * kg) + (6.25 * cm) - (5 * a) + 5;
-  const tdee  = Math.round(bmr * af);
-  const adj   = GOAL_ADJUSTMENTS[goalKey] || 0;
-  const cal   = Math.max(1200, Math.round(tdee + adj));
-  const wLbs  = parseFloat(weightLbs);
-  const pRate = PROTEIN_PER_LB[goalKey] || 0.9;
-  const protein    = Math.round(wLbs * pRate);
-  const proteinCal = protein * 4;
-  const remaining  = cal - proteinCal;
-  const carbs = Math.max(50,  Math.round((remaining * 0.55) / 4));
-  const fat   = Math.max(20,  Math.round((remaining * 0.45) / 9));
-  return { cal, protein, carbs, fat, dynamic: true, bmr: Math.round(bmr), tdee };
+  return computeMacros({ userSex: sex, userAge: age, userWeight: weightLbs, userHeight: heightText, activityLevel: activity, userGoal: goalKey });
 }
 
 /* ── INGREDIENT COST LOOKUP ($/lb unless noted) ── */
@@ -210,6 +261,7 @@ const BADGES = [
   {id:"budget_week",emoji:"💰",name:"Budget Boss",desc:"Stayed under weekly budget"},
   {id:"streak7",emoji:"🗓️",name:"Week Warrior",desc:"Logged 7 days in a row"},
   {id:"first_challenge_won",emoji:"🏆",name:"Champion",desc:"Won your first challenge"},
+  {id:"challenger",emoji:"⚔️",name:"Challenger",desc:"Joined your first challenge"},
 ];
 
 /* ── XP / LEVEL SYSTEM ── */
@@ -865,6 +917,227 @@ const TASTY_SHREDS_RECIPES = [
 /* ══════════════════════════════════════════════════
    FITNESS HUB — MAIN APP COMPONENT
 ══════════════════════════════════════════════════ */
+/* ── EXERCISE LIBRARY + ROUTINE BUILDER HELPERS ── */
+const EXERCISE_LIBRARY = [
+  ['ex_barbell_bench_press','Barbell Bench Press','PUSH','chest',['triceps','shoulders'],['barbell','bench'],'intermediate',4,'6-10',120,['compound','strength']],
+  ['ex_incline_barbell_bench','Incline Barbell Bench Press','PUSH','upper chest',['shoulders','triceps'],['barbell','bench'],'intermediate',3,'6-10',120,['compound']],
+  ['ex_close_grip_bench','Close-Grip Bench Press','PUSH','triceps',['chest','shoulders'],['barbell','bench'],'intermediate',3,'6-10',120,['compound']],
+  ['ex_dumbbell_bench_press','Dumbbell Bench Press','PUSH','chest',['triceps','shoulders'],['dumbbells','bench'],'beginner',3,'8-12',90,['dumbbell','compound']],
+  ['ex_incline_dumbbell_press','Incline Dumbbell Press','PUSH','upper chest',['shoulders','triceps'],['dumbbells','bench'],'beginner',3,'8-12',90,['dumbbell']],
+  ['ex_dumbbell_floor_press','Dumbbell Floor Press','PUSH','chest',['triceps'],['dumbbells'],'beginner',3,'8-12',75,['dumbbell','home']],
+  ['ex_push_up','Push-Up','BODYWEIGHT','chest',['triceps','shoulders'],['bodyweight'],'beginner',3,'AMRAP',60,['bodyweight','compound']],
+  ['ex_feet_elevated_push_up','Feet-Elevated Push-Up','BODYWEIGHT','upper chest',['triceps','shoulders'],['bodyweight','bench'],'intermediate',3,'8-15',60,['bodyweight']],
+  ['ex_dip','Parallel Bar Dip','BODYWEIGHT','chest',['triceps','shoulders'],['dip bars','bodyweight'],'intermediate',3,'6-12',90,['bodyweight','compound']],
+  ['ex_machine_chest_press','Machine Chest Press','PUSH','chest',['triceps','shoulders'],['machine'],'beginner',3,'8-12',75,['machine']],
+  ['ex_cable_fly','Cable Fly','PUSH','chest',['shoulders'],['cable'],'beginner',3,'12-15',60,['isolation']],
+  ['ex_pec_deck','Pec Deck','PUSH','chest',['shoulders'],['machine'],'beginner',3,'12-15',60,['isolation']],
+  ['ex_overhead_press','Barbell Overhead Press','PUSH','shoulders',['triceps','core'],['barbell'],'intermediate',4,'5-8',120,['compound','strength']],
+  ['ex_dumbbell_shoulder_press','Dumbbell Shoulder Press','PUSH','shoulders',['triceps'],['dumbbells'],'beginner',3,'8-12',90,['dumbbell','compound']],
+  ['ex_arnold_press','Arnold Press','PUSH','shoulders',['triceps'],['dumbbells'],'intermediate',3,'8-12',75,['dumbbell']],
+  ['ex_lateral_raise','Dumbbell Lateral Raise','PUSH','side delts',['traps'],['dumbbells'],'beginner',3,'12-20',45,['dumbbell','isolation']],
+  ['ex_cable_lateral_raise','Cable Lateral Raise','PUSH','side delts',[],['cable'],'beginner',3,'12-20',45,['isolation']],
+  ['ex_rear_delt_fly','Rear Delt Fly','PULL','rear delts',['upper back'],['dumbbells','machine'],'beginner',3,'12-20',45,['dumbbell','isolation']],
+  ['ex_face_pull','Face Pull','PULL','rear delts',['upper back','rotator cuff'],['cable'],'beginner',3,'12-20',45,['prehab']],
+  ['ex_skullcrusher','EZ-Bar Skullcrusher','PUSH','triceps',[],['ez bar','bench'],'intermediate',3,'8-12',60,['isolation']],
+  ['ex_cable_triceps_pushdown','Cable Triceps Pushdown','PUSH','triceps',[],['cable'],'beginner',3,'10-15',45,['isolation']],
+  ['ex_overhead_triceps_extension','Overhead Triceps Extension','PUSH','triceps',[],['dumbbell','cable'],'beginner',3,'10-15',60,['dumbbell','isolation']],
+  ['ex_diamond_push_up','Diamond Push-Up','BODYWEIGHT','triceps',['chest'],['bodyweight'],'intermediate',3,'AMRAP',60,['bodyweight']],
+  ['ex_landmine_press','Landmine Press','PUSH','shoulders',['chest','triceps'],['barbell','landmine'],'beginner',3,'8-12',75,['compound']],
+  ['ex_pull_up','Pull-Up','BODYWEIGHT','lats',['biceps','upper back'],['pull-up bar','bodyweight'],'intermediate',4,'AMRAP',120,['bodyweight','compound']],
+  ['ex_chin_up','Chin-Up','BODYWEIGHT','lats',['biceps'],['pull-up bar','bodyweight'],'intermediate',4,'AMRAP',120,['bodyweight']],
+  ['ex_lat_pulldown','Lat Pulldown','PULL','lats',['biceps','upper back'],['cable','machine'],'beginner',3,'8-12',90,['machine']],
+  ['ex_barbell_row','Barbell Row','PULL','mid back',['lats','biceps','rear delts'],['barbell'],'intermediate',4,'6-10',120,['compound','strength']],
+  ['ex_pendlay_row','Pendlay Row','PULL','mid back',['lats','biceps'],['barbell'],'advanced',4,'5-8',120,['compound']],
+  ['ex_one_arm_dumbbell_row','One-Arm Dumbbell Row','PULL','lats',['mid back','biceps'],['dumbbell','bench'],'beginner',3,'8-12',75,['dumbbell']],
+  ['ex_chest_supported_row','Chest-Supported Row','PULL','mid back',['lats','rear delts'],['dumbbells','bench'],'beginner',3,'8-12',90,['dumbbell']],
+  ['ex_seated_cable_row','Seated Cable Row','PULL','mid back',['lats','biceps'],['cable'],'beginner',3,'8-12',90,['machine']],
+  ['ex_t_bar_row','T-Bar Row','PULL','mid back',['lats','biceps'],['barbell','landmine'],'intermediate',3,'6-10',120,['compound']],
+  ['ex_inverted_row','Inverted Row','BODYWEIGHT','mid back',['biceps','rear delts'],['bar','bodyweight'],'beginner',3,'8-15',60,['bodyweight']],
+  ['ex_straight_arm_pulldown','Straight-Arm Pulldown','PULL','lats',[],['cable'],'beginner',3,'12-15',60,['isolation']],
+  ['ex_barbell_curl','Barbell Curl','PULL','biceps',[],['barbell'],'beginner',3,'8-12',60,['isolation']],
+  ['ex_dumbbell_curl','Dumbbell Curl','PULL','biceps',[],['dumbbells'],'beginner',3,'8-12',60,['dumbbell','isolation']],
+  ['ex_hammer_curl','Hammer Curl','PULL','brachialis',['biceps','forearms'],['dumbbells'],'beginner',3,'10-12',60,['dumbbell']],
+  ['ex_incline_dumbbell_curl','Incline Dumbbell Curl','PULL','biceps',[],['dumbbells','bench'],'intermediate',3,'10-12',60,['dumbbell']],
+  ['ex_preacher_curl','Preacher Curl','PULL','biceps',[],['ez bar','bench'],'beginner',3,'10-12',60,['isolation']],
+  ['ex_cable_curl','Cable Curl','PULL','biceps',[],['cable'],'beginner',3,'10-15',45,['isolation']],
+  ['ex_farmer_carry','Farmer Carry','FULL_BODY','grip',['traps','core'],['dumbbells','kettlebells'],'beginner',4,'30-60 sec',60,['carry','dumbbell']],
+  ['ex_shrug','Dumbbell Shrug','PULL','traps',['forearms'],['dumbbells'],'beginner',3,'10-15',60,['dumbbell']],
+  ['ex_back_extension','Back Extension','PULL','lower back',['glutes','hamstrings'],['roman chair'],'beginner',3,'10-15',60,['posterior_chain']],
+  ['ex_deadlift','Conventional Deadlift','FULL_BODY','posterior chain',['glutes','hamstrings','back'],['barbell'],'advanced',3,'3-6',180,['compound','strength']],
+  ['ex_trap_bar_deadlift','Trap Bar Deadlift','FULL_BODY','posterior chain',['quads','glutes','back'],['trap bar'],'intermediate',3,'4-8',150,['compound']],
+  ['ex_sumo_deadlift','Sumo Deadlift','FULL_BODY','glutes',['hamstrings','quads','back'],['barbell'],'advanced',3,'3-6',180,['compound']],
+  ['ex_barbell_back_squat','Barbell Back Squat','LEGS','quads',['glutes','hamstrings','core'],['barbell','rack'],'intermediate',4,'5-8',150,['compound','strength']],
+  ['ex_front_squat','Front Squat','LEGS','quads',['core','glutes'],['barbell','rack'],'advanced',3,'5-8',150,['compound']],
+  ['ex_goblet_squat','Goblet Squat','LEGS','quads',['glutes','core'],['dumbbell','kettlebell'],'beginner',3,'8-12',90,['dumbbell']],
+  ['ex_leg_press','Leg Press','LEGS','quads',['glutes','hamstrings'],['machine'],'beginner',4,'10-15',120,['machine']],
+  ['ex_hack_squat','Hack Squat','LEGS','quads',['glutes'],['machine'],'intermediate',3,'8-12',120,['machine']],
+  ['ex_bulgarian_split_squat','Bulgarian Split Squat','LEGS','quads',['glutes','hamstrings'],['dumbbells','bench'],'intermediate',3,'8-12/side',90,['dumbbell','single_leg']],
+  ['ex_reverse_lunge','Reverse Lunge','LEGS','quads',['glutes','hamstrings'],['dumbbells','bodyweight'],'beginner',3,'8-12/side',75,['dumbbell','single_leg']],
+  ['ex_walking_lunge','Walking Lunge','LEGS','quads',['glutes','hamstrings'],['dumbbells','bodyweight'],'beginner',3,'10-20 steps',75,['dumbbell','single_leg']],
+  ['ex_step_up','Step-Up','LEGS','quads',['glutes'],['dumbbells','box'],'beginner',3,'8-12/side',75,['dumbbell','single_leg']],
+  ['ex_leg_extension','Leg Extension','LEGS','quads',[],['machine'],'beginner',3,'12-15',60,['isolation']],
+  ['ex_romanian_deadlift','Romanian Deadlift','LEGS','hamstrings',['glutes','lower back'],['barbell'],'intermediate',3,'6-10',120,['posterior_chain']],
+  ['ex_dumbbell_rdl','Dumbbell Romanian Deadlift','LEGS','hamstrings',['glutes'],['dumbbells'],'beginner',3,'8-12',90,['dumbbell','posterior_chain']],
+  ['ex_single_leg_rdl','Single-Leg Romanian Deadlift','LEGS','hamstrings',['glutes','core'],['dumbbells'],'intermediate',3,'8-12/side',75,['dumbbell','single_leg']],
+  ['ex_hip_thrust','Barbell Hip Thrust','LEGS','glutes',['hamstrings'],['barbell','bench'],'intermediate',4,'8-12',120,['glute']],
+  ['ex_glute_bridge','Glute Bridge','LEGS','glutes',['hamstrings'],['bodyweight','barbell'],'beginner',3,'12-20',60,['bodyweight','glute']],
+  ['ex_lying_leg_curl','Lying Leg Curl','LEGS','hamstrings',[],['machine'],'beginner',3,'10-15',60,['isolation']],
+  ['ex_seated_leg_curl','Seated Leg Curl','LEGS','hamstrings',[],['machine'],'beginner',3,'10-15',60,['isolation']],
+  ['ex_calf_raise','Standing Calf Raise','LEGS','calves',[],['machine','dumbbells'],'beginner',4,'12-20',45,['dumbbell','isolation']],
+  ['ex_seated_calf_raise','Seated Calf Raise','LEGS','calves',[],['machine'],'beginner',4,'12-20',45,['isolation']],
+  ['ex_sled_push','Sled Push','FULL_BODY','quads',['glutes','calves','core'],['sled'],'intermediate',6,'20-40 yd',60,['conditioning']],
+  ['ex_box_jump','Box Jump','LEGS','power',['quads','glutes','calves'],['box'],'intermediate',4,'3-6',90,['plyometric']],
+  ['ex_wall_sit','Wall Sit','BODYWEIGHT','quads',['glutes'],['bodyweight','wall'],'beginner',3,'30-60 sec',45,['bodyweight']],
+  ['ex_plank','Plank','CORE','core',['shoulders','glutes'],['bodyweight'],'beginner',3,'30-60 sec',45,['bodyweight','anti_extension']],
+  ['ex_side_plank','Side Plank','CORE','obliques',['core','glutes'],['bodyweight'],'beginner',3,'20-45 sec/side',45,['bodyweight']],
+  ['ex_dead_bug','Dead Bug','CORE','core',['hip flexors'],['bodyweight'],'beginner',3,'8-12/side',45,['bodyweight']],
+  ['ex_bird_dog','Bird Dog','CORE','core',['glutes','lower back'],['bodyweight'],'beginner',3,'8-12/side',45,['bodyweight']],
+  ['ex_hanging_knee_raise','Hanging Knee Raise','CORE','abs',['hip flexors','grip'],['pull-up bar'],'intermediate',3,'8-15',60,['bodyweight']],
+  ['ex_hanging_leg_raise','Hanging Leg Raise','CORE','abs',['hip flexors','grip'],['pull-up bar'],'advanced',3,'6-12',75,['bodyweight']],
+  ['ex_cable_crunch','Cable Crunch','CORE','abs',[],['cable'],'beginner',3,'10-15',60,['loaded_core']],
+  ['ex_ab_wheel','Ab Wheel Rollout','CORE','abs',['lats','shoulders'],['ab wheel'],'intermediate',3,'6-12',60,['anti_extension']],
+  ['ex_pallof_press','Pallof Press','CORE','core',['obliques'],['cable','band'],'beginner',3,'10-12/side',45,['anti_rotation']],
+  ['ex_russian_twist','Russian Twist','CORE','obliques',['abs'],['medicine ball','bodyweight'],'beginner',3,'16-24 total',45,['rotation']],
+  ['ex_bicycle_crunch','Bicycle Crunch','CORE','abs',['obliques'],['bodyweight'],'beginner',3,'20-30 total',45,['bodyweight']],
+  ['ex_reverse_crunch','Reverse Crunch','CORE','abs',['hip flexors'],['bodyweight'],'beginner',3,'10-15',45,['bodyweight']],
+  ['ex_mountain_climber','Mountain Climber','CORE','core',['shoulders','hip flexors'],['bodyweight'],'beginner',3,'30-45 sec',45,['bodyweight','conditioning']],
+  ['ex_burpee','Burpee','FULL_BODY','conditioning',['chest','quads','core'],['bodyweight'],'intermediate',4,'8-15',60,['bodyweight','conditioning']],
+  ['ex_bear_crawl','Bear Crawl','FULL_BODY','core',['shoulders','quads'],['bodyweight'],'beginner',4,'20-40 yd',60,['bodyweight','conditioning']],
+  ['ex_treadmill_walk','Incline Treadmill Walk','CARDIO','cardio',['calves','glutes'],['treadmill'],'beginner',1,'20-45 min',0,['zone2']],
+  ['ex_stationary_bike','Stationary Bike','CARDIO','cardio',['quads'],['bike'],'beginner',1,'20-45 min',0,['zone2']],
+  ['ex_rower','Rower','CARDIO','cardio',['back','legs'],['rower'],'beginner',1,'10-30 min',0,['conditioning']],
+  ['ex_elliptical','Elliptical','CARDIO','cardio',['legs'],['elliptical'],'beginner',1,'20-45 min',0,['zone2']],
+  ['ex_jump_rope','Jump Rope','CARDIO','cardio',['calves','shoulders'],['jump rope'],'intermediate',5,'60 sec',30,['conditioning']],
+  ['ex_sprints','Sprints','CARDIO','cardio',['hamstrings','glutes'],['track'],'advanced',8,'10-20 sec',90,['hiit']],
+  ['ex_battle_ropes','Battle Ropes','CARDIO','conditioning',['shoulders','core'],['battle ropes'],'intermediate',6,'20-30 sec',45,['hiit']],
+  ['ex_assault_bike','Assault Bike Intervals','CARDIO','conditioning',['quads','shoulders'],['assault bike'],'intermediate',8,'20 sec hard',70,['hiit']],
+  ['ex_stair_climber','Stair Climber','CARDIO','cardio',['glutes','quads'],['stair climber'],'beginner',1,'15-30 min',0,['zone2']],
+  ['ex_kettlebell_swing','Kettlebell Swing','FULL_BODY','posterior chain',['glutes','hamstrings','core'],['kettlebell'],'intermediate',4,'12-20',60,['conditioning']],
+  ['ex_kettlebell_goblet_squat','Kettlebell Goblet Squat','LEGS','quads',['glutes','core'],['kettlebell'],'beginner',3,'10-15',75,['compound']],
+  ['ex_kettlebell_clean','Kettlebell Clean','FULL_BODY','power',['glutes','shoulders','core'],['kettlebell'],'intermediate',4,'5-8/side',75,['power']],
+  ['ex_kettlebell_snatch','Kettlebell Snatch','FULL_BODY','power',['shoulders','glutes','core'],['kettlebell'],'advanced',4,'5-8/side',90,['power']],
+  ['ex_turkish_get_up','Turkish Get-Up','FULL_BODY','core',['shoulders','glutes'],['kettlebell'],'advanced',3,'2-4/side',90,['stability']],
+  ['ex_thruster','Dumbbell Thruster','FULL_BODY','quads',['shoulders','triceps','core'],['dumbbells'],'intermediate',4,'8-12',75,['dumbbell','conditioning']],
+  ['ex_clean_press','Dumbbell Clean and Press','FULL_BODY','power',['shoulders','glutes','core'],['dumbbells'],'intermediate',4,'5-8',90,['dumbbell','power']],
+  ['ex_renegade_row','Renegade Row','FULL_BODY','core',['back','chest'],['dumbbells'],'intermediate',3,'6-10/side',75,['dumbbell','anti_rotation']],
+  ['ex_man_maker','Dumbbell Man Maker','FULL_BODY','conditioning',['chest','back','legs'],['dumbbells'],'advanced',4,'5-8',90,['dumbbell','conditioning']],
+  ['ex_bodyweight_squat','Bodyweight Squat','BODYWEIGHT','quads',['glutes'],['bodyweight'],'beginner',3,'12-20',45,['bodyweight']],
+  ['ex_air_lunge','Bodyweight Lunge','BODYWEIGHT','quads',['glutes','hamstrings'],['bodyweight'],'beginner',3,'10-15/side',45,['bodyweight']],
+  ['ex_squat_jump','Squat Jump','BODYWEIGHT','power',['quads','glutes','calves'],['bodyweight'],'intermediate',4,'6-10',60,['bodyweight','plyometric']],
+  ['ex_pike_push_up','Pike Push-Up','BODYWEIGHT','shoulders',['triceps'],['bodyweight'],'intermediate',3,'6-12',60,['bodyweight']],
+  ['ex_handstand_push_up','Handstand Push-Up','BODYWEIGHT','shoulders',['triceps','core'],['bodyweight','wall'],'advanced',4,'3-8',90,['bodyweight']],
+  ['ex_bodyweight_triceps_extension','Bodyweight Triceps Extension','BODYWEIGHT','triceps',['core'],['bar','bodyweight'],'intermediate',3,'8-15',60,['bodyweight']],
+  ['ex_glute_ham_raise','Glute-Ham Raise','LEGS','hamstrings',['glutes','calves'],['ghd'],'advanced',3,'6-10',90,['posterior_chain']],
+  ['ex_nordic_curl','Nordic Hamstring Curl','BODYWEIGHT','hamstrings',['glutes'],['bodyweight'],'advanced',3,'4-8',90,['bodyweight','posterior_chain']],
+  ['ex_copenhagen_plank','Copenhagen Plank','CORE','adductors',['obliques','core'],['bench','bodyweight'],'advanced',3,'15-30 sec/side',60,['bodyweight']],
+  ['ex_cossack_squat','Cossack Squat','LEGS','adductors',['quads','glutes'],['bodyweight','dumbbell'],'intermediate',3,'6-10/side',75,['mobility','single_leg']],
+  ['ex_good_morning','Good Morning','LEGS','hamstrings',['glutes','lower back'],['barbell'],'advanced',3,'8-10',120,['posterior_chain']],
+  ['ex_cable_woodchop','Cable Woodchop','CORE','obliques',['core'],['cable'],'beginner',3,'10-12/side',45,['rotation']],
+  ['ex_medicine_ball_slam','Medicine Ball Slam','FULL_BODY','power',['core','lats'],['medicine ball'],'beginner',4,'8-15',60,['conditioning']],
+  ['ex_push_press','Push Press','FULL_BODY','shoulders',['triceps','quads','core'],['barbell'],'intermediate',4,'3-6',120,['power']],
+  ['ex_front_rack_carry','Front Rack Carry','FULL_BODY','core',['upper back','quads'],['kettlebells','dumbbells'],'intermediate',4,'30-60 sec',60,['carry']],
+  ['ex_waiter_carry','Waiter Carry','FULL_BODY','shoulders',['core','grip'],['kettlebell','dumbbell'],'intermediate',3,'30-45 sec/side',60,['carry','stability']],
+  ['ex_dumbbell_pullover','Dumbbell Pullover','PULL','lats',['chest','serratus'],['dumbbell','bench'],'beginner',3,'10-12',60,['dumbbell']],
+  ['ex_z_press','Z Press','PUSH','shoulders',['triceps','core'],['barbell','dumbbells'],'advanced',3,'6-10',90,['compound']],
+  ['ex_sissy_squat','Sissy Squat','LEGS','quads',[],['bodyweight','machine'],'advanced',3,'8-12',75,['quad']],
+  ['ex_slant_board_squat','Slant Board Squat','LEGS','quads',['glutes'],['slant board','dumbbell'],'intermediate',3,'10-15',75,['dumbbell']],
+  ['ex_prone_y_raise','Prone Y Raise','PULL','lower traps',['rear delts'],['bench','dumbbells'],'beginner',3,'12-15',45,['dumbbell','prehab']],
+  ['ex_band_pull_apart','Band Pull-Apart','PULL','rear delts',['upper back'],['band'],'beginner',3,'15-25',30,['prehab']],
+  ['ex_worlds_greatest_stretch','Worlds Greatest Stretch','FULL_BODY','mobility',['hips','t-spine'],['bodyweight'],'beginner',2,'5/side',30,['mobility','cooldown']],
+  ['ex_hip_flexor_stretch','Half-Kneeling Hip Flexor Stretch','FULL_BODY','mobility',['hips','quads'],['bodyweight'],'beginner',2,'30 sec/side',20,['mobility','cooldown']],
+  ['ex_lat_stretch','Bench Lat Stretch','FULL_BODY','mobility',['lats','t-spine'],['bench'],'beginner',2,'30 sec',20,['mobility','cooldown']],
+].map(([id, name, category, primary, secondary, equipment, level, defaultSets, defaultReps, defaultRest, tags]) => ({
+  id, name, category, primary, secondary, equipment, level, defaultSets, defaultReps, defaultRest, tags,
+}));
+
+function normalizeExerciseText(s) {
+  return String(s || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function findExerciseById(id) {
+  return EXERCISE_LIBRARY.find(ex => ex.id === id) || null;
+}
+
+function categoryMatches(ex, category) {
+  if (!category || category === 'ALL' || category === 'CUSTOM') return true;
+  const normalized = category === 'LOWER' ? 'LEGS' : category === 'FULL BODY' ? 'FULL_BODY' : category;
+  return ex.category === normalized || (ex.tags || []).includes(normalizeExerciseText(category).replace(/\s/g, '_'));
+}
+
+function searchExercises(query = '', category = 'ALL') {
+  const q = normalizeExerciseText(query);
+  const terms = q ? q.split(' ') : [];
+  return EXERCISE_LIBRARY
+    .filter(ex => {
+      if (!categoryMatches(ex, category)) return false;
+      if (!terms.length) return true;
+      const hay = normalizeExerciseText([ex.name, ex.category, ex.primary, ...(ex.secondary || []), ...(ex.equipment || []), ...(ex.tags || [])].join(' '));
+      return terms.every(t => hay.includes(t));
+    })
+    .slice(0, 30);
+}
+
+function exerciseToRoutineItem(ex, overrides = {}) {
+  return {
+    exerciseId: ex.id,
+    name: ex.name,
+    sets: overrides.sets || ex.defaultSets || 3,
+    reps: overrides.reps || ex.defaultReps || '8-12',
+    rest: overrides.rest || ex.defaultRest || 60,
+    primary: ex.primary,
+    secondary: ex.secondary || [],
+    category: ex.category,
+    equipment: ex.equipment || [],
+    source: 'library',
+  };
+}
+
+function matchExerciseFromLibrary(name) {
+  const q = normalizeExerciseText(name);
+  if (!q) return null;
+  let best = null, bestScore = 0;
+  EXERCISE_LIBRARY.forEach(ex => {
+    const n = normalizeExerciseText(ex.name);
+    let score = n === q ? 100 : n.includes(q) || q.includes(n) ? 80 : 0;
+    q.split(' ').forEach(term => { if (term.length > 2 && n.includes(term)) score += 8; });
+    if (score > bestScore) { best = ex; bestScore = score; }
+  });
+  return bestScore >= 40 ? best : null;
+}
+
+function recommendComplementary(currentExercises = []) {
+  const enriched = currentExercises.map(e => e.exerciseId ? findExerciseById(e.exerciseId) : matchExerciseFromLibrary(e.name)).filter(Boolean);
+  const existing = new Set(currentExercises.map(e => normalizeExerciseText(e.name)));
+  const count = cat => enriched.filter(e => e.category === cat).length;
+  const hasTag = tag => enriched.some(e => (e.tags || []).includes(tag));
+  const muscles = new Set(enriched.flatMap(e => [e.primary, ...(e.secondary || [])].map(normalizeExerciseText)));
+  const priorities = [];
+  if (count('PUSH') > count('PULL')) priorities.push('PULL');
+  if (count('PULL') > count('PUSH')) priorities.push('PUSH');
+  if (count('LEGS') === 0) priorities.push('LEGS');
+  if (currentExercises.length >= 4 && count('CORE') === 0) priorities.push('CORE');
+  if (currentExercises.length >= 5 && count('CARDIO') === 0) priorities.push('CARDIO');
+  if (currentExercises.length >= 4 && !hasTag('cooldown')) priorities.push('COOLDOWN');
+
+  const scored = EXERCISE_LIBRARY
+    .filter(ex => !existing.has(normalizeExerciseText(ex.name)))
+    .map(ex => {
+      let score = 0;
+      if (priorities.includes(ex.category)) score += 30;
+      if (priorities.includes('COOLDOWN') && (ex.tags || []).includes('cooldown')) score += 25;
+      if (muscles.has('chest') && ex.category === 'PULL') score += 12;
+      if ((muscles.has('lats') || muscles.has('mid back')) && ex.category === 'PUSH') score += 12;
+      if (muscles.has('quads') && (ex.primary === 'hamstrings' || ex.primary === 'glutes')) score += 10;
+      if (muscles.has('hamstrings') && ex.primary === 'quads') score += 10;
+      if (ex.level === 'beginner') score += 3;
+      if ((ex.tags || []).includes('compound')) score += 2;
+      return { ex, score };
+    })
+    .filter(x => x.score > 0)
+    .sort((a, b) => b.score - a.score);
+  return scored.map(x => x.ex).slice(0, 5);
+}
+
 function FitnessHub() {
 
   /* ── persistent state ── */
@@ -1047,6 +1320,7 @@ function FitnessHub() {
   const [selectedExercise, setSelectedExercise] = useState('');
   /* ── LEVEL chat ── */
   const [levelMsgs,      setLevelMsgs]      = useState(() => load('levelMsgs', []));
+  const [levelHistory,   setLevelHistory]   = useState(() => load('levelHistory', []));
   const [levelInput,     setLevelInput]     = useState('');
   const [levelTyping,    setLevelTyping]    = useState(false);
   const levelChatEndRef = useRef(null);
@@ -1068,6 +1342,10 @@ function FitnessHub() {
   const [rbExRest,   setRbExRest]   = useState('60');
   const [rbSuggesting, setRbSuggesting] = useState(false);
   const [rbGenerating, setRbGenerating] = useState(false);
+  const [rbTab,        setRbTab]        = useState('search');
+  const [rbSearch,     setRbSearch]     = useState('');
+  const [rbPasteText,  setRbPasteText]  = useState('');
+  const [rbParsing,    setRbParsing]    = useState(false);
 
   /* ── Beta welcome + Feedback ── */
   const [showBetaModal, setShowBetaModal] = useState(() => !load('betaSeen', false));
@@ -1141,6 +1419,7 @@ function FitnessHub() {
   useEffect(() => save('adjustDismissed',  adjustDismissed),  [adjustDismissed]);
   useEffect(() => save('pantry',           pantry),           [pantry]);
   useEffect(() => save('levelMsgs',        levelMsgs),        [levelMsgs]);
+  useEffect(() => save('levelHistory',     levelHistory),     [levelHistory]);
   useEffect(() => save('customRoutines',   customRoutines),   [customRoutines]);
   useEffect(() => save('workoutSchedule',  workoutSchedule),  [workoutSchedule]);
   useEffect(() => save('userMemory',       userMemory),       [userMemory]);
@@ -1156,6 +1435,7 @@ function FitnessHub() {
         save('mealPlan',      mealPlan);
         save('userXP',        userXP);
         save('levelMsgs',     levelMsgs);
+        save('levelHistory',  levelHistory);
         save('customRoutines',customRoutines);
         save('userMemory',    userMemory);
         const today = todayStr();
@@ -1171,7 +1451,7 @@ function FitnessHub() {
       document.removeEventListener('visibilitychange', onVis);
       window.removeEventListener('beforeunload', forceSave);
     };
-  }, [vault, shopList, checkIns, mealPlan, userXP, levelMsgs, customRoutines, userMemory]);
+  }, [vault, shopList, checkIns, mealPlan, userXP, levelMsgs, levelHistory, customRoutines, userMemory]);
 
   /* ── Debounced cloud sync: push 5s after any data change (signed-in only) ── */
   useEffect(() => {
@@ -1180,7 +1460,7 @@ function FitnessHub() {
     syncTimerRef.current = setTimeout(pushCloudSync, 5000);
     return () => clearTimeout(syncTimerRef.current);
   }, [vault, shopList, checkIns, mealPlan, userXP, customRoutines, saved, pantry,
-      weightLog, earnedBadges, levelMsgs, userMemory, entries,
+      weightLog, earnedBadges, levelMsgs, levelHistory, userMemory, entries,
       userName, userGoal, userWeight, userHeight, userAge, accentColor]);
 
   /* ── Pull from cloud when app comes back to foreground (signed-in) ── */
@@ -1399,7 +1679,7 @@ function FitnessHub() {
   const _dynGoal  = computeDynamicGoal(userSex, userAge, userWeight, userHeight, activityLevel, userGoal);
   const _baseGoal = GOAL_PRESETS[userGoal] || GOAL_PRESETS.recomp;
   const goal      = customGoalCal && customGoalProtein
-    ? { ..._baseGoal, cal: customGoalCal, protein: customGoalProtein, dynamic: false }
+    ? { ..._baseGoal, cal: customGoalCal, protein: customGoalProtein, dynamic: false, basis: 'Manual target override' }
     : (_dynGoal || _baseGoal);
   const todayCal  = entries.reduce((s, e) => s + (e.cal     || 0), 0);
   const todayPro  = entries.reduce((s, e) => s + (e.protein || 0), 0);
@@ -1836,7 +2116,7 @@ Write a 4-sentence weekly review: 1) What went well (cite a specific number), 2)
   function buildUserState() {
     const today = todayStr();
     const todayEntries = load('entries_' + today, []);
-    const totalCal  = todayEntries.reduce((a, e) => a + (e.calories || 0), 0);
+    const totalCal  = todayEntries.reduce((a, e) => a + (e.cal || e.calories || 0), 0);
     const totalPro  = todayEntries.reduce((a, e) => a + (e.protein  || 0), 0);
     const calLeft   = Math.max(0, goal.cal - totalCal);
     const proLeft   = Math.max(0, goal.protein - totalPro);
@@ -1861,15 +2141,19 @@ Write a 4-sentence weekly review: 1) What went well (cite a specific number), 2)
       const maxW = Math.max(0, ...(ex.sets || []).map(st => parseFloat(st.weight) || 0));
       if (maxW > 0 && (!prs[ex.name] || maxW > prs[ex.name])) prs[ex.name] = maxW;
     }));
+    const recent7DayAvgCal = getRecent7DayAvgCal();
+    const recentWorkoutCount = getRecentWorkoutCount(7);
     return {
-      today, goalLabel: goal.label, goalCal: goal.cal, goalProtein: goal.protein,
+      today, goalLabel: goal.label, goalCal: goal.cal, goalProtein: goal.protein, goalCarbs: goal.carbs, goalFat: goal.fat,
       totalCal, totalPro, calLeft, proLeft, pctCal, pctPro,
       workoutsWk, lastSession, hrsSince, inPostWorkout: hrsSince < 2,
       energyLevel: todayCI?.energy ?? null, hungerLevel: todayCI?.hunger ?? null,
       dietScore: todayCI?.dietScore ?? null,
       weightTrend: trend, currentWeight: parseFloat(userWeight) || null,
       streak, xp: userXP, level: lv.level, levelName: lv.name, levelEmoji: lv.emoji,
-      userName: userName || 'You', userGoal, weekBudget,
+      userName: userName || 'You', userGoal, userAge, userSex, userWeight, userHeight, activityLevel, weekBudget,
+      tdee: goal.tdee || null, targetCal: goal.cal, targetProtein: goal.protein, targetCarbs: goal.carbs, targetFat: goal.fat,
+      recent7DayAvgCal, recentWorkoutCount,
       pantryItems: pantry.map(p => p.name),
       topPRs: Object.entries(prs).sort((a, b) => b[1] - a[1]).slice(0, 3),
       savedCount: saved.length,
@@ -1883,6 +2167,52 @@ Write a 4-sentence weekly review: 1) What went well (cite a specific number), 2)
       memoryDietNotes: (userMemory.dietNotes||[]).slice(-2),
     };
   }
+
+
+  function getRecent7DayAvgCal() {
+    let total = 0;
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(); d.setDate(d.getDate() - i);
+      const ds = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+      total += load('entries_' + ds, []).reduce((s, e) => s + (e.cal || e.calories || 0), 0);
+    }
+    return Math.round(total / 7);
+  }
+
+  function getRecentWorkoutCount(days = 7) {
+    const since = new Date();
+    since.setDate(since.getDate() - days);
+    return vault.filter(s => new Date(s.date || s.ts || 0) >= since).length;
+  }
+
+  function getLevelModel() {
+    return userPlan === 'elite' ? 'claude-sonnet-4-6' : 'claude-haiku-4-5-20251001';
+  }
+
+  function getCoachContext(state = buildUserState()) {
+    const lv = getLevelInfo(userXP);
+    const lastAdvice = levelHistory[levelHistory.length - 1];
+    const workoutDelta = lastAdvice?.workoutCountAtAdvice != null ? vault.length - lastAdvice.workoutCountAtAdvice : 0;
+    const adviceConflict = workoutDelta > 0 && /rest|skip|recovery|light session/i.test(lastAdvice.level || '')
+      ? '\nRecent pattern: user trained after LEVEL suggested recovery; acknowledge and adapt next advice.'
+      : '';
+    return [
+      'User profile:',
+      '  Age: ' + (userAge || 'unknown') + ', Sex: ' + (userSex || 'unknown') + ', Weight: ' + (userWeight || 'unknown') + ', Height: ' + (userHeight || 'unknown'),
+      '  Activity: ' + (activityLevel || 'unknown') + ', Goal: ' + userGoal,
+      '  Maintenance: ' + (state.tdee || goal.tdee || 'unknown') + ' kcal · Target: ' + (state.targetCal || goal.cal) + ' kcal',
+      '  Macros: ' + (state.targetProtein || goal.protein) + 'g P / ' + (state.targetCarbs || goal.carbs) + 'g C / ' + (state.targetFat || goal.fat) + 'g F',
+      '  Last 7-day workout count: ' + state.recentWorkoutCount,
+      '  Last 7-day avg calories: ' + state.recent7DayAvgCal,
+      '  Streak: ' + state.streak + ' days',
+      '  XP / Level: ' + userXP + ' / ' + lv.name + adviceConflict,
+    ].join('\n');
+  }
+
+  function getRecentLevelHistoryText() {
+    return levelHistory.slice(-5).map((h, i) => (i+1) + '. User: ' + h.user + '\n   LEVEL: ' + String(h.level || '').slice(0, 500)).join('\n');
+  }
+
 
   /* ── LAYER 2: Intent Parser ── */
   function parseIntent(msg) {
@@ -2207,12 +2537,15 @@ Write a 4-sentence weekly review: 1) What went well (cite a specific number), 2)
             ...(state.memoryDietNotes||[]).map(d=>`Diet note: ${d}`),
           ].join(' | ');
           const stateSnap = `Goal:${state.goalLabel} | Cal:${state.totalCal}/${state.goalCal} | Pro:${state.totalPro}/${state.goalProtein}g | Streak:${state.streak} | Workouts/wk:${state.workoutsWk} | Energy:${state.energyLevel??'?'}/10 | Weight:${state.weightTrend?(state.weightTrend.delta>0?'+':'')+state.weightTrend.delta+'lbs/'+state.weightTrend.days+'d':'N/A'}${memCtx?' | '+memCtx:''}`;
-          const ai = await callClaude([{ role:'user', content:`You are LEVEL, a sharp no-nonsense AI fitness coach who remembers this user's history.\nUser: "${msg}"\nData: ${stateSnap}\nEngine decision: "${decision.decision}"\nConversation #${(state.conversationCount||0)+1} with this user.\nAdd 1-2 sentences of direct, personalized coaching. Reference their history if relevant. No fluff, no repeating data.` }], 180);
+          const coachContext = getCoachContext(state);
+          const recentHistory = getRecentLevelHistoryText();
+          const ai = await callClaude([{ role:'user', content:`You are LEVEL, a sharp no-nonsense AI fitness coach who remembers this user's history.\nUser: "${msg}"\n\n${coachContext}\n\nData snapshot: ${stateSnap}\n${recentHistory ? `Recent LEVEL history:\n${recentHistory}\n` : ''}Engine decision: "${decision.decision}"\nConversation #${(state.conversationCount||0)+1} with this user.\nAdd 1-2 sentences of direct, personalized coaching. Reference their history if relevant. No fluff, no medical claims.` }], 180, getLevelModel());
           if (ai?.trim()) response += `\n\n💬 ${ai.trim()}`;
         } catch(e) { /* AI is optional — never break the response */ }
       }
       updateUserMemory(msg, intent);
       setLevelMsgs(p => [...p, { role:'level', text:response, ts:Date.now(), cta: decision.cta||null, groceryAdditions: decision.groceryAdditions||null, scaledRecipeName: decision.scaledRecipeName||null }]);
+      setLevelHistory(p => [...p.slice(-19), { user: msg, level: response, intent, ts: Date.now(), workoutCountAtAdvice: vault.length }]);
     } catch(e) {
       setLevelMsgs(p => [...p, { role:'level', text:`System error. Check your data and try again.`, ts:Date.now() }]);
     } finally {
@@ -4590,6 +4923,7 @@ ${sample}`;
         createdBy: userName, startDate: todayStr(), createdAt: Date.now(), checkins: [], isOwn: true,
       };
       setMyChallenges(p => [...p, challenge]);
+      awardBadge('challenger');
       gunPutMeta(challenge);   // push metadata to Gun P2P
       gunSyncProgress(challenge); // push creator's progress
       setCreatedLink(buildLink(challenge));
@@ -5186,6 +5520,7 @@ ${sample}`;
       vault, shopList, checkIns, mealPlan, userXP,
       customRoutines, saved, pantry, weightLog, earnedBadges,
       levelMsgs: levelMsgs.slice(-50),
+      levelHistory: levelHistory.slice(-20),
       userMemory, entries: entriesMap,
       userName, userAge, userWeight, userHeight, userSex,
       activityLevel, userGoal, weekBudget: Number(weekBudget),
@@ -5233,6 +5568,7 @@ ${sample}`;
       if (d.weightLog?.length)          { setWeightLog(d.weightLog);       save('weightLog', d.weightLog); }
       if (d.earnedBadges?.length)       { setEarnedBadges(d.earnedBadges); save('earnedBadges', d.earnedBadges); }
       if (d.levelMsgs?.length)          { setLevelMsgs(d.levelMsgs);       save('levelMsgs', d.levelMsgs); }
+      if (d.levelHistory?.length)       { setLevelHistory(d.levelHistory); save('levelHistory', d.levelHistory); }
       if (d.userMemory)                 { setUserMemory(d.userMemory);     save('userMemory', d.userMemory); }
       if (d.userName)                   { setUserName(d.userName);         save('userName', d.userName); }
       if (d.userAge)                    { setUserAge(d.userAge);           save('userAge', d.userAge); }
@@ -5273,6 +5609,11 @@ ${sample}`;
         user_weight: userWeight,
         user_height: userHeight,
         activity_level: activityLevel,
+        tdee: goal.tdee || null,
+        target_cal: goal.cal || null,
+        target_protein_g: goal.protein || null,
+        target_carb_g: goal.carbs || null,
+        target_fat_g: goal.fat || null,
         accent_color: accentColor,
         earned_badges: earnedBadges,
         updated_at: new Date().toISOString(),
@@ -5877,7 +6218,7 @@ ${sample}`;
               {/* Dynamic calorie summary card */}
               {goal.dynamic ? (
                 <div style={{ background: `${accentColor}12`, borderRadius: 20, padding: '16px 18px', border: `1px solid ${accentColor}30`, marginBottom: 20 }}>
-                  <div style={{ fontSize: 10, color: accentColor, letterSpacing: 1, fontWeight: 700, marginBottom: 10 }}>⚡ YOUR CALCULATED TARGETS</div>
+                  <div style={{ fontSize: 10, color: accentColor, letterSpacing: 1, fontWeight: 700, marginBottom: 10 }}>⚡ YOUR NUMBERS</div>
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 6, marginBottom: 12 }}>
                     {[
                       { label: 'CALORIES', value: goal.cal,     color: '#FF6B4A', unit: 'kcal' },
@@ -5897,6 +6238,8 @@ ${sample}`;
                     <span>TDEE: <span style={{ color: '#aaa' }}>{goal.tdee} kcal</span></span>
                     <span>Goal adj: <span style={{ color: '#aaa' }}>{GOAL_ADJUSTMENTS[userGoal] >= 0 ? '+' : ''}{GOAL_ADJUSTMENTS[userGoal]} kcal</span></span>
                   </div>
+                  <div style={{ fontSize: 10, color: '#6b8797', marginTop: 10, lineHeight: 1.5 }}>{goal.basis || 'Mifflin-St Jeor · personalized target'}</div>
+                  <div style={{ fontSize: 10, color: '#4a6a7a', marginTop: 4, lineHeight: 1.5 }}>Estimate only — adjust based on real weight changes after 2-3 weeks.</div>
                 </div>
               ) : (
                 <div style={{ background: 'rgba(255,165,0,0.08)', borderRadius: 14, padding: '12px 14px', border: '1px solid rgba(255,165,0,0.2)', marginBottom: 16 }}>
@@ -6340,6 +6683,57 @@ ${sample}`;
     const TAG_OPTS   = ['PUSH','PULL','LOWER','UPPER','FULL BODY','CARDIO','CUSTOM'];
     const CLR_OPTS   = ['#FF6B4A','#4A9EFF','#F5C842','#B06BFF','#4BDE80','#EC4899','#06B6D4','#10B981'];
 
+    const libraryCategory = rbTag === 'LOWER' ? 'LEGS' : rbTag === 'FULL BODY' ? 'FULL_BODY' : rbTag;
+    const rbLibraryResults = searchExercises(rbSearch, libraryCategory);
+    const rbRecommended = recommendComplementary(rbExercises);
+
+    function addLibraryExercise(ex, overrides = {}) {
+      const item = exerciseToRoutineItem(ex, overrides);
+      const exists = rbExercises.some(e => normalizeExerciseText(e.name) === normalizeExerciseText(item.name));
+      if (exists) return showToast('Exercise already added', 'info');
+      setRbExercises(prev => [...prev, item]);
+      if (!rbName.trim() && rbTag !== 'CUSTOM') setRbName(rbTag + ' Day');
+    }
+
+    function updateRoutineExercise(i, patch) {
+      setRbExercises(prev => prev.map((ex, idx) => idx === i ? { ...ex, ...patch } : ex));
+    }
+
+    async function parsePastedRoutine() {
+      if (!rbPasteText.trim()) return showToast('Paste a routine first', 'error');
+      setRbParsing(true);
+      try {
+        const prompt = 'Parse this workout routine into JSON. Return ONLY a JSON array, no markdown:\n' +
+          '[{"day":"Day 1 - Push","name":"Bench Press","exerciseQuery":"bench press","sets":4,"reps":"6"}]\n\n' +
+          'Routine:\n' + rbPasteText;
+        const resp = await callClaude([{ role:'user', content: prompt }], 1200, 'claude-haiku-4-5-20251001');
+        let rows = [];
+        try { rows = JSON.parse(resp.match(/\[[\s\S]*\]/)?.[0] || '[]'); } catch(e) {}
+        if (!Array.isArray(rows) || rows.length === 0) {
+          rows = rbPasteText.split('\n').map(line => {
+            const m = line.match(/^\s*-?\s*([A-Za-z][A-Za-z\s\-\/]+?)\s+(\d+)\s*x\s*([A-Za-z0-9\-]+)/i);
+            return m ? { name:m[1].trim(), exerciseQuery:m[1].trim(), sets:parseInt(m[2]), reps:m[3] } : null;
+          }).filter(Boolean);
+        }
+        if (!rows.length) return showToast('Could not parse routine', 'error');
+        const mapped = rows.slice(0, 30).map(row => {
+          const match = matchExerciseFromLibrary(row.exerciseQuery || row.name);
+          const overrides = { sets: parseInt(row.sets) || 3, reps: String(row.reps || '8-12'), rest: parseInt(row.rest) || undefined };
+          return match
+            ? { ...exerciseToRoutineItem(match, overrides), sourceDay: row.day || '' }
+            : { name: String(row.name || row.exerciseQuery || 'Exercise'), sets: overrides.sets, reps: overrides.reps, rest: parseInt(row.rest)||60, source:'custom_paste', sourceDay: row.day || '' };
+        });
+        setRbExercises(prev => [...prev, ...mapped]);
+        if (!rbName.trim()) setRbName(rows[0]?.day || 'Imported Routine');
+        setRbTab('search');
+        showToast('Imported ' + mapped.length + ' exercises', 'success');
+      } catch(e) {
+        showToast('Routine import failed', 'error');
+      } finally {
+        setRbParsing(false);
+      }
+    }
+
     async function aiSuggest() {
       setRbSuggesting(true);
       const existing = rbExercises.map(e => e.name).join(', ');
@@ -6397,7 +6791,7 @@ Include 5-7 exercises. No explanation, just JSON.`;
         focus:     rbName.trim(),
         day:       'Custom',
         isCustom:  true,
-        exercises: rbExercises,
+        exercises: rbExercises.map(e => ({ ...e, sets: parseInt(e.sets)||3, reps: String(e.reps||'8-12'), rest: parseInt(e.rest)||60 })),
       };
       if (editingRoutine) {
         setCustomRoutines(prev => prev.map(r => r.id === editingRoutine.id ? routine : r));
@@ -6471,6 +6865,67 @@ Include 5-7 exercises. No explanation, just JSON.`;
             {rbGenerating ? '🧠 BUILDING YOUR ROUTINE...' : '🧠 LET LEVEL BUILD MY ROUTINE'}
           </button>
 
+          {/* Library tabs */}
+          <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:6, marginBottom:10 }}>
+            {[['search','SEARCH'],['recommended','RECOMMENDED'],['paste','PASTE ROUTINE']].map(([id,label]) => (
+              <button key={id} onClick={() => setRbTab(id)}
+                style={{ padding:'9px 6px', borderRadius:10, border:'1px solid ' + (rbTab===id ? rbColor : 'rgba(255,255,255,0.08)'), background: rbTab===id ? rbColor+'18' : 'rgba(255,255,255,0.03)', color: rbTab===id ? rbColor : '#666', fontSize:10, fontWeight:800, cursor:'pointer', fontFamily:'inherit' }}>
+                {label}
+              </button>
+            ))}
+          </div>
+
+          {rbTab === 'search' && (
+            <div style={{ background:'rgba(255,255,255,0.02)', borderRadius:14, padding:12, border:'1px solid rgba(255,255,255,0.06)', marginBottom:14 }}>
+              <input value={rbSearch} onChange={e => setRbSearch(e.target.value)} placeholder="Search exercises, muscles, equipment..."
+                style={{ width:'100%', padding:'10px 12px', borderRadius:10, border:'1px solid rgba(255,255,255,0.08)', background:'rgba(255,255,255,0.04)', color:'#fff', fontSize:13, fontFamily:'inherit', outline:'none', marginBottom:10 }} />
+              <div style={{ display:'grid', gap:6, maxHeight:220, overflowY:'auto' }}>
+                {rbLibraryResults.map(ex => (
+                  <button key={ex.id} onClick={() => addLibraryExercise(ex)}
+                    style={{ display:'flex', justifyContent:'space-between', gap:10, textAlign:'left', padding:'9px 10px', borderRadius:10, border:'1px solid rgba(255,255,255,0.06)', background:'rgba(0,0,0,0.14)', color:'#ddd', cursor:'pointer', fontFamily:'inherit' }}>
+                    <span style={{ minWidth:0 }}>
+                      <span style={{ display:'block', fontSize:12, fontWeight:700, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{ex.name}</span>
+                      <span style={{ display:'block', fontSize:10, color:'#4a6a7a' }}>{ex.primary} · {ex.defaultSets}x{ex.defaultReps} · {ex.equipment.join(', ')}</span>
+                    </span>
+                    <span style={{ fontSize:10, color:rbColor, fontWeight:800, flexShrink:0 }}>ADD</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {rbTab === 'recommended' && (
+            <div style={{ background:'rgba(75,222,128,0.04)', borderRadius:14, padding:12, border:'1px solid rgba(75,222,128,0.14)', marginBottom:14 }}>
+              <div style={{ fontSize:10, color:'#4BDE80', letterSpacing:1, fontWeight:800, marginBottom:8 }}>SMART BALANCE PICKS</div>
+              <div style={{ display:'grid', gap:6 }}>
+                {(rbRecommended.length ? rbRecommended : searchExercises('', libraryCategory).slice(0,5)).map(ex => (
+                  <button key={ex.id} onClick={() => addLibraryExercise(ex)}
+                    style={{ display:'flex', justifyContent:'space-between', gap:10, textAlign:'left', padding:'9px 10px', borderRadius:10, border:'1px solid rgba(75,222,128,0.12)', background:'rgba(0,0,0,0.12)', color:'#ddd', cursor:'pointer', fontFamily:'inherit' }}>
+                    <span>
+                      <span style={{ display:'block', fontSize:12, fontWeight:700 }}>{ex.name}</span>
+                      <span style={{ display:'block', fontSize:10, color:'#4a6a7a' }}>{ex.category} · {ex.primary} · {ex.defaultSets}x{ex.defaultReps}</span>
+                    </span>
+                    <span style={{ fontSize:10, color:'#4BDE80', fontWeight:800 }}>ADD</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {rbTab === 'paste' && (
+            <div style={{ background:'rgba(168,85,247,0.05)', borderRadius:14, padding:12, border:'1px solid rgba(168,85,247,0.18)', marginBottom:14 }}>
+              <textarea value={rbPasteText} onChange={e => setRbPasteText(e.target.value)}
+                placeholder={'Day 1 - Push\n- Bench Press 4x6\n- OHP 3x8\n- Dips 3x12'}
+                rows={6}
+                style={{ width:'100%', padding:'10px 12px', borderRadius:10, border:'1px solid rgba(255,255,255,0.08)', background:'rgba(0,0,0,0.18)', color:'#fff', fontSize:12, fontFamily:'inherit', outline:'none', resize:'vertical', marginBottom:10 }} />
+              <button onClick={parsePastedRoutine} disabled={rbParsing || !rbPasteText.trim()}
+                style={{ width:'100%', padding:'11px 14px', borderRadius:10, border:'none', background: rbPasteText.trim() ? '#A855F7' : 'rgba(255,255,255,0.06)', color: rbPasteText.trim() ? '#fff' : '#333', fontFamily:"'Oswald',sans-serif", fontSize:14, fontWeight:800, cursor: rbPasteText.trim()?'pointer':'not-allowed' }}>
+                {rbParsing ? 'PARSING...' : 'IMPORT ROUTINE'}
+              </button>
+            </div>
+          )}
+
+
           {/* Exercise list */}
           <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:8 }}>
             <div style={{ fontSize:9, color:'#4a6a7a', letterSpacing:1 }}>EXERCISES ({rbExercises.length})</div>
@@ -6489,14 +6944,27 @@ Include 5-7 exercises. No explanation, just JSON.`;
           )}
 
           {rbExercises.map((ex, i) => (
-            <div key={i} style={{ display:'flex', alignItems:'center', gap:8, padding:'10px 12px', background:'rgba(255,255,255,0.03)', borderRadius:12, marginBottom:6, border:'1px solid rgba(255,255,255,0.06)' }}>
-              <div style={{ width:22, height:22, borderRadius:6, background:rbColor+'30', display:'flex', alignItems:'center', justifyContent:'center', fontSize:10, color:rbColor, fontWeight:700, flexShrink:0 }}>{i+1}</div>
-              <div style={{ flex:1, minWidth:0 }}>
-                <div style={{ fontSize:13, color:'#ddd', fontWeight:600, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{ex.name}</div>
-                <div style={{ fontSize:10, color:'#555', marginTop:1 }}>{ex.sets} sets · {ex.reps} reps · {ex.rest}s rest</div>
+            <div key={i} style={{ padding:'10px 12px', background:'rgba(255,255,255,0.03)', borderRadius:12, marginBottom:7, border:'1px solid rgba(255,255,255,0.06)' }}>
+              <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:8 }}>
+                <div style={{ width:22, height:22, borderRadius:6, background:rbColor+'30', display:'flex', alignItems:'center', justifyContent:'center', fontSize:10, color:rbColor, fontWeight:700, flexShrink:0 }}>{i+1}</div>
+                <input value={ex.name} onChange={e => updateRoutineExercise(i, { name:e.target.value })}
+                  style={{ flex:1, minWidth:0, padding:'8px 10px', borderRadius:9, border:'1px solid rgba(255,255,255,0.08)', background:'rgba(0,0,0,0.15)', color:'#ddd', fontSize:13, fontWeight:700, fontFamily:'inherit', outline:'none' }} />
+                <button onClick={() => setRbExercises(prev => prev.filter((_,j) => j !== i))}
+                  style={{ background:'none', border:'none', color:'#555', fontSize:16, cursor:'pointer', padding:'3px 5px', flexShrink:0 }}>✕</button>
               </div>
-              <button onClick={() => setRbExercises(prev => prev.filter((_,j) => j !== i))}
-                style={{ background:'none', border:'none', color:'#444', fontSize:16, cursor:'pointer', padding:'3px 5px', flexShrink:0 }}>✕</button>
+              <div style={{ display:'grid', gridTemplateColumns:'0.8fr 1.2fr 0.8fr', gap:6 }}>
+                <input type="number" value={ex.sets} onChange={e => updateRoutineExercise(i, { sets:e.target.value })}
+                  style={{ width:'100%', padding:'7px 8px', borderRadius:8, border:'1px solid rgba(255,255,255,0.06)', background:'rgba(0,0,0,0.14)', color:'#aaa', fontSize:12, fontFamily:'inherit', outline:'none' }} />
+                <input value={ex.reps} onChange={e => updateRoutineExercise(i, { reps:e.target.value })}
+                  style={{ width:'100%', padding:'7px 8px', borderRadius:8, border:'1px solid rgba(255,255,255,0.06)', background:'rgba(0,0,0,0.14)', color:'#aaa', fontSize:12, fontFamily:'inherit', outline:'none' }} />
+                <input type="number" value={ex.rest} onChange={e => updateRoutineExercise(i, { rest:e.target.value })}
+                  style={{ width:'100%', padding:'7px 8px', borderRadius:8, border:'1px solid rgba(255,255,255,0.06)', background:'rgba(0,0,0,0.14)', color:'#aaa', fontSize:12, fontFamily:'inherit', outline:'none' }} />
+              </div>
+              {(ex.primary || ex.sourceDay) && (
+                <div style={{ fontSize:10, color:'#4a6a7a', marginTop:6 }}>
+                  {ex.sourceDay ? ex.sourceDay + ' · ' : ''}{ex.primary ? ex.primary + (ex.category ? ' · '+ex.category : '') : 'Imported'}
+                </div>
+              )}
             </div>
           ))}
 
@@ -6997,6 +7465,7 @@ Include 5-7 exercises. No explanation, just JSON.`;
                 const accepted = { ...pendingChallenge, startDate: pendingChallenge.startDate || todayStr(), createdAt: Date.now(), isOwn: false };
                 // Keep original ID so everyone shares the same leaderboard on Gun
                 setMyChallenges(p => [...p.filter(c => c.id !== accepted.id), accepted]);
+                awardBadge('challenger');
                 gunSyncProgress(accepted); // push my progress immediately
                 setPendingChallenge(null);
                 setScreen('challenges');
@@ -7014,7 +7483,7 @@ Include 5-7 exercises. No explanation, just JSON.`;
 
 /* ── SERVICE WORKER ── */
 if ('serviceWorker' in navigator) {
-  const sw = `const C='drews-hub-v38';self.addEventListener('install',e=>{e.waitUntil(caches.open(C).then(c=>c.addAll(['.'])));self.skipWaiting();});self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==C).map(k=>caches.delete(k)))));self.clients.claim();});self.addEventListener('fetch',e=>{if(e.request.method!=='GET')return;const u=e.request.url;if(u.includes('api.anthropic.com')||u.includes('openfoodfacts')||u.includes('themealdb')||u.includes('fonts.googleapis')||u.includes('cdnjs')||u.includes('supabase.co'))return;e.respondWith(caches.match(e.request).then(r=>r||fetch(e.request).then(res=>{if(res&&res.ok){const cl=res.clone();caches.open(C).then(c=>c.put(e.request,cl));}return res;})));});`;
+  const sw = `const C='drews-hub-v40';self.addEventListener('install',e=>{e.waitUntil(caches.open(C).then(c=>c.addAll(['.'])));self.skipWaiting();});self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==C).map(k=>caches.delete(k)))));self.clients.claim();});self.addEventListener('fetch',e=>{if(e.request.method!=='GET')return;const u=e.request.url;if(u.includes('api.anthropic.com')||u.includes('openfoodfacts')||u.includes('themealdb')||u.includes('fonts.googleapis')||u.includes('cdnjs')||u.includes('supabase.co'))return;e.respondWith(caches.match(e.request).then(r=>r||fetch(e.request).then(res=>{if(res&&res.ok){const cl=res.clone();caches.open(C).then(c=>c.put(e.request,cl));}return res;})));});`;
   try { navigator.serviceWorker.register(URL.createObjectURL(new Blob([sw], { type: 'application/javascript' }))).catch(() => {}); } catch {}
 }
 
