@@ -24,6 +24,9 @@ serve(async (req) => {
 
     /* ── 1. Identify user from JWT ── */
     let userId: string | null = null
+    let userPlan = 'free'
+    let dailyLimit = PLAN_LIMITS.free
+    let newCount = 1
     const authHeader = req.headers.get('Authorization')
     if (authHeader && SUPABASE_URL && SUPABASE_SERVICE_KEY) {
       try {
@@ -44,8 +47,8 @@ serve(async (req) => {
             .select('plan')
             .eq('id', userId)
             .maybeSingle()
-          const plan = profile?.plan ?? 'free'
-          const dailyLimit = PLAN_LIMITS[plan] ?? PLAN_LIMITS.free
+          userPlan = profile?.plan ?? 'free'
+          dailyLimit = PLAN_LIMITS[userPlan] ?? PLAN_LIMITS.free
 
           // Get current count
           const { data: row } = await sb
@@ -59,22 +62,17 @@ serve(async (req) => {
 
           if (currentCount >= dailyLimit) {
             return new Response(
-              JSON.stringify({ error: 'daily_limit_reached', limit: dailyLimit, plan }),
+              JSON.stringify({ error: 'daily_limit_reached', limit: dailyLimit, plan: userPlan }),
               { headers: { ...cors, 'Content-Type': 'application/json' }, status: 402 }
             )
           }
 
+          newCount = currentCount + 1
           // Upsert row with incremented count
           if (row) {
-            await sb
-              .from('ai_usage')
-              .update({ count: currentCount + 1 })
-              .eq('user_id', userId)
-              .eq('date', today)
+            await sb.from('ai_usage').update({ count: newCount }).eq('user_id', userId).eq('date', today)
           } else {
-            await sb
-              .from('ai_usage')
-              .insert({ user_id: userId, date: today, count: 1 })
+            await sb.from('ai_usage').insert({ user_id: userId, date: today, count: 1 })
           }
         }
       } catch (authErr) {
@@ -110,11 +108,12 @@ serve(async (req) => {
 
     const data = await r.json()
 
-    // Attach remaining daily uses to response metadata
+    // Attach remaining daily uses so client can show counter
     const responseBody: any = { ...data }
     if (userId) {
-      // We already know count — embed it so client can show remaining
-      // (count was incremented above, so remaining = limit - newCount)
+      responseBody._remaining = Math.max(0, dailyLimit - newCount)
+      responseBody._limit = dailyLimit
+      responseBody._plan = userPlan
     }
 
     return new Response(JSON.stringify(responseBody), {

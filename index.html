@@ -11,7 +11,9 @@
   <title>Level Up Fitness</title>
   <link rel="manifest" href="data:application/json,{%22name%22:%22Level Up Fitness%22,%22short_name%22:%22Level Up%22,%22start_url%22:%22.%22,%22display%22:%22standalone%22,%22background_color%22:%22%230c0c18%22,%22theme_color%22:%22%230c0c18%22,%22icons%22:[{%22src%22:%22data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='100' fill='%230c0c18'/%3E%3Ctext x='256' y='340' font-size='280' text-anchor='middle'%3E%F0%9F%A7%A0%3C/text%3E%3C/svg%3E%22,%22sizes%22:%22512x512%22,%22type%22:%22image/svg+xml%22,%22purpose%22:%22any maskable%22}]}"/>
   <link rel="apple-touch-icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'><rect width='512' height='512' rx='100' fill='%230c0c18'/><text x='256' y='340' font-size='280' text-anchor='middle'>💪</text></svg>"/>
-  <style>*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}html,body{height:100%;overflow:hidden;background:#0c0c18;}#root{height:100%;}body{-webkit-font-smoothing:antialiased;}</style>
+  <style>*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}html,body{height:100%;overflow:hidden;background:#0c0c18;}#root{height:100%;}body{-webkit-font-smoothing:antialiased;}.adsbygoogle-placeholder{display:none;}@keyframes pulse{0%,100%{opacity:1;transform:scale(1);}50%{opacity:0.6;transform:scale(1.08);}}@keyframes spin{to{transform:rotate(360deg);}}</style>
+  <!-- AdSense: replace ca-pub-XXXXXXXXXXXXXXXXX with your publisher ID, then remove the display:none from .adsbygoogle-placeholder -->
+  <!-- <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-XXXXXXXXXXXXXXXXX" crossorigin="anonymous"></script> -->
 </head>
 <body>
 <div id="root"></div>
@@ -206,6 +208,8 @@ const BADGES = [
   {id:"workouts5",emoji:"⚡",name:"5 Workouts",desc:"Completed 5 workouts total"},
   {id:"first_recipe",emoji:"📖",name:"Recipe Saver",desc:"Saved your first recipe"},
   {id:"budget_week",emoji:"💰",name:"Budget Boss",desc:"Stayed under weekly budget"},
+  {id:"streak7",emoji:"🗓️",name:"Week Warrior",desc:"Logged 7 days in a row"},
+  {id:"first_challenge_won",emoji:"🏆",name:"Champion",desc:"Won your first challenge"},
 ];
 
 /* ── XP / LEVEL SYSTEM ── */
@@ -394,7 +398,7 @@ function BarcodeScanner({onScan, onClose}){
 }
 
 /* ── WORKOUT TIMER ── */
-function WorkoutTimerApp({onBack,onSave,customRoutines=[]}){
+function WorkoutTimerApp({onBack,onSave,customRoutines=[],scheduledWorkoutId=null}){
   /* ── Draft restore: resume unfinished session ── */
   const _draft=load('sessionDraft',null);
   const _hasDraft=!!(_draft&&_draft.selectedDay!==null&&_draft.screen==='session');
@@ -524,8 +528,11 @@ function WorkoutTimerApp({onBack,onSave,customRoutines=[]}){
         </div>
         <div style={{display:"flex",flexDirection:"column",gap:12}}>
           {WORKOUTS.length>0&&<div style={{fontSize:10,color:"#3a5a6a",letterSpacing:2,marginBottom:4}}>PRESET PROGRAMS</div>}
-          {WORKOUTS.map((w,i)=>(
-            <button key={i} onClick={()=>startSession(i)} style={{background:`linear-gradient(120deg,${w.color}18 0%,rgba(255,255,255,0.02) 100%)`,border:`1px solid ${w.color}40`,borderRadius:18,padding:"20px",cursor:"pointer",textAlign:"left",fontFamily:"inherit",width:"100%"}}>
+          {WORKOUTS.map((w,i)=>{
+            const isScheduled=scheduledWorkoutId&&w.focus===scheduledWorkoutId;
+            return(
+            <button key={i} onClick={()=>startSession(i)} style={{background:`linear-gradient(120deg,${w.color}${isScheduled?'30':'18'} 0%,rgba(255,255,255,0.02) 100%)`,border:`${isScheduled?'2px':'1px'} solid ${w.color}${isScheduled?'80':'40'}`,borderRadius:18,padding:"20px",cursor:"pointer",textAlign:"left",fontFamily:"inherit",width:"100%",position:"relative"}}>
+              {isScheduled&&<div style={{position:"absolute",top:10,right:12,fontSize:9,color:w.color,fontWeight:700,letterSpacing:1,background:`${w.color}25`,padding:"2px 8px",borderRadius:6}}>📅 TODAY</div>}
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                 <div>
                   <div style={{fontSize:10,color:w.color,letterSpacing:2,fontWeight:700,marginBottom:6,textTransform:"uppercase"}}>{w.tag} · {w.day}</div>
@@ -535,11 +542,15 @@ function WorkoutTimerApp({onBack,onSave,customRoutines=[]}){
                 <div style={{width:48,height:48,borderRadius:14,background:w.color,display:"flex",alignItems:"center",justifyContent:"center",fontSize:20,flexShrink:0,color:"#000",fontWeight:700}}>▶</div>
               </div>
             </button>
-          ))}
+          );})}
           {customRoutines.length>0&&<div style={{fontSize:10,color:"#3a5a6a",letterSpacing:2,marginTop:8,marginBottom:4}}>MY ROUTINES</div>}
-          {customRoutines.map((w,ci)=>(
-            <button key={w.id||ci} onClick={()=>startSession(WORKOUTS.length+ci)} style={{background:`linear-gradient(120deg,${w.color}22 0%,rgba(255,255,255,0.02) 100%)`,border:`2px solid ${w.color}60`,borderRadius:18,padding:"20px",cursor:"pointer",textAlign:"left",fontFamily:"inherit",width:"100%",position:"relative"}}>
-              <div style={{position:"absolute",top:10,right:12,fontSize:9,color:w.color,fontWeight:700,letterSpacing:1,background:`${w.color}20`,padding:"2px 7px",borderRadius:6}}>MY ROUTINE</div>
+          {customRoutines.map((w,ci)=>{
+            const isScheduled=scheduledWorkoutId&&(w.id||w.name)===scheduledWorkoutId;
+            return(
+            <button key={w.id||ci} onClick={()=>startSession(WORKOUTS.length+ci)} style={{background:`linear-gradient(120deg,${w.color}${isScheduled?'35':'22'} 0%,rgba(255,255,255,0.02) 100%)`,border:`${isScheduled?'2px':'2px'} solid ${w.color}${isScheduled?'90':'60'}`,borderRadius:18,padding:"20px",cursor:"pointer",textAlign:"left",fontFamily:"inherit",width:"100%",position:"relative"}}>
+              {isScheduled
+                ?<div style={{position:"absolute",top:10,right:12,fontSize:9,color:w.color,fontWeight:700,letterSpacing:1,background:`${w.color}25`,padding:"2px 8px",borderRadius:6}}>📅 TODAY</div>
+                :<div style={{position:"absolute",top:10,right:12,fontSize:9,color:w.color,fontWeight:700,letterSpacing:1,background:`${w.color}20`,padding:"2px 7px",borderRadius:6}}>MY ROUTINE</div>}
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                 <div>
                   <div style={{fontSize:10,color:w.color,letterSpacing:2,fontWeight:700,marginBottom:6,textTransform:"uppercase"}}>{w.tag}</div>
@@ -549,7 +560,8 @@ function WorkoutTimerApp({onBack,onSave,customRoutines=[]}){
                 <div style={{width:48,height:48,borderRadius:14,background:w.color,display:"flex",alignItems:"center",justifyContent:"center",fontSize:20,flexShrink:0,color:"#000",fontWeight:700}}>▶</div>
               </div>
             </button>
-          ))}
+          );})}
+
         </div>
       </div>
     </div>
@@ -897,6 +909,7 @@ function FitnessHub() {
   const [trainTab,     setTrainTab]     = useState('today');
   const [shopTab,      setShopTab]      = useState('list');
   const [cookbookTab,  setCookbookTab]  = useState('shreds');
+  const [selectedCookbookId, setSelectedCookbookId] = useState(null);
   const [shredsSearch, setShredsSearch] = useState('');
   const [showSettings, setShowSettings] = useState(false);
   const [showBarcode,  setShowBarcode]  = useState(false);
@@ -908,9 +921,31 @@ function FitnessHub() {
   const [earnedBadges, setEarnedBadges] = useState(() => load('earnedBadges', []));
   /* ── auth ── */
   const [currentUser,  setCurrentUser]  = useState(null);
-  const [userPlan,     setUserPlan]     = useState('free');
-  const [showAuth,     setShowAuth]     = useState(false);
-  const [showPaywall,  setShowPaywall]  = useState(false);
+  const [userPlan,       setUserPlan]       = useState('free');
+  /* per-cookbook entitlements ['tastyshreds', '<custom-id>', ...] */
+  const [cookbookUnlocks, setCookbookUnlocks] = useState(() => load('cookbookUnlocks', []));
+  const [importedCookbooks, setImportedCookbooks] = useState(() => load('importedCookbooks', []));
+  const [showCookbookImport, setShowCookbookImport] = useState(false);
+  const [showCookbookPaywall, setShowCookbookPaywall] = useState(null); // cookbook obj or null
+  const [cookbookImportText, setCookbookImportText] = useState('');
+  const [cookbookImportName, setCookbookImportName] = useState('');
+  const [cookbookImportAuthor, setCookbookImportAuthor] = useState('');
+  const [cookbookImportLoading, setCookbookImportLoading] = useState(false);
+  const [cookbookExtractedRecipes, setCookbookExtractedRecipes] = useState([]);
+  const [cookbookSelectedIds, setCookbookSelectedIds] = useState(new Set());
+  const [userPlan_chosen, setUserPlanChosen] = useState(() => load('planChosen', false));
+  const [trialStartedAt, setTrialStartedAt] = useState(() => load('trialStartedAt', null));
+  const [trialPlan, setTrialPlan] = useState(() => load('trialPlan', null));
+  const [contestEntries, setContestEntries] = useState(() => load('contestEntries', 0));
+  const [signupStep, setSignupStep] = useState('signup'); // 'signup' | 'signin'
+  const [showAuth,       setShowAuth]       = useState(false);
+  const [showPaywall,    setShowPaywall]    = useState(false);
+  const [aiRemaining,    setAiRemaining]    = useState(null);
+  const [aiLimit,        setAiLimit]        = useState(15);
+  const [showRewardedAd, setShowRewardedAd] = useState(false);
+  const [rewardCountdown,setRewardCountdown]= useState(0);
+  const [rewardReady,    setRewardReady]    = useState(false);
+  const rewardTimerRef = useRef(null);
   const [authMode,     setAuthMode]     = useState('signin');
   const [authEmail,    setAuthEmail]    = useState('');
   const [authPassword, setAuthPassword] = useState('');
@@ -924,9 +959,17 @@ function FitnessHub() {
   const [logCarb,     setLogCarb]     = useState('');
   const [logFat,      setLogFat]      = useState('');
   const [barcodeData, setBarcodeData] = useState(null);
+  /* ── voice logging ── */
+  const [voiceListening,    setVoiceListening]    = useState(false);
+  const [voiceParsing,      setVoiceParsing]      = useState(false);
+  const [voiceItems,        setVoiceItems]        = useState([]);
+  const [showVoiceConfirm,  setShowVoiceConfirm]  = useState(false);
+  const [voiceTranscript,   setVoiceTranscript]   = useState('');
+  const voiceRecogRef = useRef(null);
 
   /* ── cookbook ── */
   const [activeRecipe,  setActiveRecipe]  = useState(null);
+  const [recipeServings, setRecipeServings] = useState(1);
   const [searchQ,       setSearchQ]       = useState('');
   const [onlineResults, setOnlineResults] = useState([]);
   const [searching,     setSearching]     = useState(false);
@@ -1010,6 +1053,8 @@ function FitnessHub() {
 
   /* ── Custom Routines ── */
   const [customRoutines,   setCustomRoutines]   = useState(() => load('customRoutines', []));
+  const [workoutSchedule,  setWorkoutSchedule]  = useState(() => load('workoutSchedule', {}));
+  const [schedDayPicker,   setSchedDayPicker]   = useState(null); // day key being assigned
   const [showRoutineBuilder, setShowRoutineBuilder] = useState(false);
   const [editingRoutine,   setEditingRoutine]   = useState(null);
   /* routine builder fields — all hoisted (no hooks inside modal) */
@@ -1056,6 +1101,12 @@ function FitnessHub() {
 
   /* ── persist on change ── */
   useEffect(() => save('savedRecipes',           saved),      [saved]);
+  useEffect(() => save('cookbookUnlocks',        cookbookUnlocks), [cookbookUnlocks]);
+  useEffect(() => save('importedCookbooks',      importedCookbooks), [importedCookbooks]);
+  useEffect(() => save('planChosen',             userPlan_chosen), [userPlan_chosen]);
+  useEffect(() => save('trialStartedAt',         trialStartedAt), [trialStartedAt]);
+  useEffect(() => save('trialPlan',              trialPlan), [trialPlan]);
+  useEffect(() => save('contestEntries',         contestEntries), [contestEntries]);
   useEffect(() => save('mealPlan',               mealPlan),   [mealPlan]);
   useEffect(() => save('shopList',               shopList),   [shopList]);
   useEffect(() => save('workoutVault',           vault),      [vault]);
@@ -1091,6 +1142,7 @@ function FitnessHub() {
   useEffect(() => save('pantry',           pantry),           [pantry]);
   useEffect(() => save('levelMsgs',        levelMsgs),        [levelMsgs]);
   useEffect(() => save('customRoutines',   customRoutines),   [customRoutines]);
+  useEffect(() => save('workoutSchedule',  workoutSchedule),  [workoutSchedule]);
   useEffect(() => save('userMemory',       userMemory),       [userMemory]);
   useEffect(() => { if (screen === 'level') levelChatEndRef.current?.scrollIntoView({ behavior:'smooth' }); }, [levelMsgs, levelTyping, screen]);
 
@@ -1713,31 +1765,51 @@ Write a 4-sentence weekly review: 1) What went well (cite a specific number), 2)
     const m = msg.toLowerCase();
     const toOzMap = { lb:16,lbs:16,pound:16,pounds:16,oz:1,ounce:1,ounces:1,g:0.035,gram:0.035,grams:0.035,kg:35.2,cup:8,cups:8,can:13,cans:13 };
     const wordQty = { half:0.5, quarter:0.25, one:1, two:2, three:3, four:4 };
+    // Extract cooking method before anything else
+    const METHODS = ['slow cooker','crock pot','crockpot','air fryer','instant pot','pressure cooker','baked','oven','grilled','grill','stovetop','stove top','skillet','microwave','sheet pan','one pan','one pot'];
+    const cookingMethod = METHODS.find(cm => m.includes(cm)) || null;
     let qty = null, unit = 'unit';
     const numM = m.match(/(\d+(?:\.\d+)?)\s*(lb|lbs|pound|pounds|oz|ounce|ounces|cup|cups|can|cans|g|gram|grams|kg|piece|pieces|breast|breasts|scoop|scoops)?/);
     const wrdM = m.match(/\b(half|quarter|one|two|three|four)\b/);
     if (numM) { qty = parseFloat(numM[1]); unit = numM[2] || 'unit'; }
     else if (wrdM) { qty = wordQty[wrdM[1]]; unit = 'unit'; }
     let ingredient = m
-      .replace(/\b(i have|i got|i own|i already have|make me something with|make something with|make (me\s*)?a? recipe (with|using)|cook with|use my|using my|make with|i want to (use|cook|make)|what can i (make|cook) with)\b/gi,'')
+      .replace(/\b(i have|i got|i own|i already have|make me something with|make something with|make (me\s*)?a? recipe (with|using)|cook with|use my|using my|make with|i want to (use|cook|make)|what can i (make|cook) with|i want|a |high protein|slow|cooker|air fryer|instant pot|pressure cooker|baked|grilled|oven)\b/gi,'')
+      .replace(cookingMethod ? new RegExp(cookingMethod.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'),'gi') : '__NOPE__','')
       .replace(numM?.[0]||'__NOPE__','')
       .replace(wrdM?.[0]||'__NOPE__','')
-      .replace(/\b(of|some|a|an|the|and|my|me)\b/gi,'')
+      .replace(/\b(of|some|a|an|the|and|my|me|meal)\b/gi,'')
       .replace(/[,\.!?]/g,'')
       .trim();
-    console.log('[LEVEL] parseIngredientRequest:', { qty, unit, ingredient });
-    return { qty, unit, ingredient, toOzMap };
+    console.log('[LEVEL] parseIngredientRequest:', { qty, unit, ingredient, cookingMethod });
+    return { qty, unit, ingredient, toOzMap, cookingMethod };
   }
 
-  function findBestRecipe(ingredient) {
+  function findBestRecipe(ingredient, cookingMethod, goalProtein) {
     const all = [...(saved||[]), ...SEED_RECIPES];
     if (!ingredient || ingredient.length < 2) return null;
     const kw = ingredient.toLowerCase().split(/\s+/).filter(w => w.length > 2);
     if (!kw.length) return null;
+    const pantryNamesLC = (pantry||[]).map(p => (p.name||'').toLowerCase());
+    const targetProtein = goalProtein || goal?.protein || 40;
     const scored = all.map(r => {
-      const body = [r.name, ...(r.ingredients||[]).map(i=>i.item||i.name||'')].join(' ').toLowerCase();
-      const score = kw.reduce((s,k) => s + (body.includes(k) ? (r.name.toLowerCase().includes(k)?3:1) : 0), 0);
-      return { r, score };
+      const body = [r.name, r.instructions||'', ...(r.ingredients||[]).map(i=>i.item||i.name||'')].join(' ').toLowerCase();
+      // 1. Keyword match (ingredient in recipe)
+      const kwScore = kw.reduce((s,k) => s + (body.includes(k) ? (r.name.toLowerCase().includes(k)?3:1) : 0), 0);
+      if (kwScore === 0) return { r, score: 0 };
+      // 2. Protein score (0–4 pts)
+      const pro = r.protein || r.cal_pro || 0;
+      const proScore = pro >= targetProtein ? 4 : pro >= targetProtein * 0.7 ? 2 : 0;
+      // 3. Pantry match score (0–3 pts) — more owned ingredients = better
+      const ings = r.ingredients || [];
+      const pantryHits = ings.filter(i => {
+        const nm = (i.name||i.item||'').toLowerCase();
+        return nm && pantryNamesLC.some(p => nm.includes(p.split(' ')[0]) || p.includes(nm.split(' ')[0]));
+      }).length;
+      const pantryScore = ings.length > 0 ? Math.round((pantryHits / ings.length) * 3) : 0;
+      // 4. Cooking method match (0–5 pts)
+      const methodScore = cookingMethod && body.includes(cookingMethod.toLowerCase()) ? 5 : 0;
+      return { r, score: kwScore + proScore + pantryScore + methodScore };
     }).filter(x=>x.score>0).sort((a,b)=>b.score-a.score);
     return scored.length ? scored[0].r : null;
   }
@@ -1804,6 +1876,7 @@ Write a 4-sentence weekly review: 1) What went well (cite a specific number), 2)
       hasCustomRoutines: customRoutines.length > 0,
       customRoutineCount: customRoutines.length,
       customRoutineNames: customRoutines.map(r => r.name),
+      todayScheduledWorkout: workoutSchedule[['sun','mon','tue','wed','thu','fri','sat'][getTodayIdx()]] || null,
       memoryStruggles: (userMemory.struggles||[]).slice(-3).map(s=>s.note),
       memoryWins: (userMemory.wins||[]).slice(-3).map(w=>w.note),
       conversationCount: userMemory.conversationCount||0,
@@ -1877,15 +1950,17 @@ Write a 4-sentence weekly review: 1) What went well (cite a specific number), 2)
       case 'workout': {
         const energyOk = state.energyLevel === null || state.energyLevel >= 6;
         const rested   = state.hrsSince > 18;
+        const sched    = state.todayScheduledWorkout;
         return {
-          insight: `${state.workoutsWk} session${state.workoutsWk !== 1?'s':''} this week. ${state.lastSession ? `Last: ${state.lastSession.focus||state.lastSession.day} (${Math.round(state.hrsSince)}h ago)` : 'No recent sessions.'}`,
+          insight: `${state.workoutsWk} session${state.workoutsWk !== 1?'s':''} this week. ${state.lastSession ? `Last: ${state.lastSession.focus||state.lastSession.day} (${Math.round(state.hrsSince)}h ago)` : 'No recent sessions.'}${sched ? ` Scheduled today: ${sched}.` : ''}`,
           decision: !energyOk ? `Energy at ${state.energyLevel}/10 — light session or active recovery only.`
             : !rested ? `Only ${Math.round(state.hrsSince)}h since last session. Hit an opposing muscle group.`
+            : sched ? `System go. Hit your scheduled ${sched} at full intensity.`
             : `System go. Train at full intensity.`,
           options: energyOk && rested
-            ? [`Full session — scheduled workout`, `HIIT finisher (20-30 min)`, `Extra volume on lagging muscle group`]
+            ? [sched ? `Start ${sched} — scheduled for today` : `Full session — pick a routine in Train tab`, `HIIT finisher (20-30 min)`, `Extra volume on lagging muscle group`]
             : [`Active recovery: 20-min walk + mobility`, `Bodyweight only — protect joints`, `Full rest — max out protein + sleep`],
-          why: `Based on ${state.hrsSince < 999 ? Math.round(state.hrsSince) + 'h recovery' : 'no recent session'}, energy ${state.energyLevel ?? 'unknown'}/10, ${state.workoutsWk} workouts this week.`,
+          why: `Based on ${state.hrsSince < 999 ? Math.round(state.hrsSince) + 'h recovery' : 'no recent session'}, energy ${state.energyLevel ?? 'unknown'}/10, ${state.workoutsWk} workouts this week${sched ? `, ${sched} scheduled` : ''}.`,
         };
       }
       case 'progress': {
@@ -1966,18 +2041,23 @@ Write a 4-sentence weekly review: 1) What went well (cite a specific number), 2)
         };
       }
       case 'ingredientCook': {
-        const { qty, unit, ingredient } = parseIngredientRequest(rawMsg);
-        const recipe = findBestRecipe(ingredient);
+        const { qty, unit, ingredient, cookingMethod } = parseIngredientRequest(rawMsg);
+        // Auto-add stated ingredient to pantry if not already there
+        if (ingredient && ingredient.length > 2) {
+          const alreadyOwned = (pantry||[]).some(p => (p.name||'').toLowerCase().includes(ingredient.split(' ')[0]));
+          if (!alreadyOwned) setPantry(p => [...p, { id: Date.now(), name: ingredient }]);
+        }
+        const recipe = findBestRecipe(ingredient, cookingMethod, state.goalProtein);
         if (!recipe) {
+          // Signal sendLevelMessage to call Claude — makeDecision is sync so we flag it
           return {
-            insight: `Ingredient detected: "${ingredient || 'unknown'}"`,
-            decision: `No matching recipe found for that ingredient in your library or the built-in recipes.`,
-            options: [
-              `Try: "I have ground turkey" or "I have chicken breast"`,
-              `Browse recipes in the Cook tab`,
-              `Your pantry: ${state.pantryItems.length ? state.pantryItems.join(', ') : 'empty — add items in Planner'}`,
-            ],
-            why: `LEVEL searches your saved recipes + 5 built-in high-protein recipes. Add more in the Cook tab to expand matching.`,
+            _claudeRecipeFallback: true,
+            _ingredient: ingredient,
+            _cookingMethod: cookingMethod,
+            insight: `No saved recipe matched "${ingredient}${cookingMethod ? ' + ' + cookingMethod : ''}". Asking AI…`,
+            decision: `Generating a custom recipe now.`,
+            options: [],
+            why: '',
           };
         }
         const { factor, scaledIngredients } = scaleRecipeByIngredient(recipe, ingredient, qty, unit);
@@ -2081,7 +2161,41 @@ Write a 4-sentence weekly review: 1) What went well (cite a specific number), 2)
       const state    = buildUserState();
       const intent   = parseIntent(msg);
       const rules    = runRules(intent, state);
-      const decision = makeDecision(intent, rules, state, msg);
+      let decision = makeDecision(intent, rules, state, msg);
+      // Claude recipe fallback — triggered when no local recipe matched ingredientCook
+      if (decision._claudeRecipeFallback) {
+        const ing = decision._ingredient;
+        const method = decision._cookingMethod;
+        const claudeQuery = [method, ing, `${goal.label} goal`, `${goal.protein}g protein`].filter(Boolean).join(' ');
+        try {
+          const recipes = await generateRecipeWithClaude(claudeQuery);
+          const r = recipes?.[0];
+          if (r) {
+            const pantryLC = (pantry||[]).map(p => (p.name||'').toLowerCase());
+            const ownedIng = nm => { const n=(nm||'').toLowerCase(); return n && pantryLC.some(p=>n.includes(p.split(' ')[0])||p.includes(n.split(' ')[0])); };
+            const ings = r.ingredients || [];
+            const missing = ings.filter(i => !ownedIng(i.name||i.item)).map(i=>`${i.amount?i.amount+' ':''}${i.name||i.item||''}`).filter(Boolean);
+            const ingList = ings.map(i=>`${i.amount?i.amount+' ':''}${i.name||''}`).join(', ');
+            const steps = typeof r.instructions === 'string'
+              ? r.instructions.split(/\n+/).filter(s=>s.trim()).map((s,i)=>`${i+1}. ${s.replace(/^\d+\.\s*/,'')}`)
+              : (r.instructions||[]).map((s,si)=>`${si+1}. ${s}`);
+            decision = {
+              insight: `**${r.name}** · ${r.protein||0}g protein · ${r.calories||0} kcal${method?' · '+method:''}`,
+              decision: `Make ${r.name} using your ${ing}.`,
+              options: [
+                `Ingredients: ${ingList}`,
+                `Instructions:\n${steps.join('\n')}`,
+                missing.length ? `Need to buy (${missing.length}): ${missing.join(', ')}` : `✅ You have everything!`,
+              ],
+              why: missing.length ? `${missing.length} item${missing.length>1?'s':''} missing — tap below to add to grocery list.` : `Your pantry covers it. Start cooking!`,
+              groceryAdditions: missing,
+              scaledRecipeName: r.name,
+            };
+          }
+        } catch(e) {
+          decision = { insight: `AI recipe generation failed.`, decision: `Check your API connection and try again.`, options: [], why: '' };
+        }
+      }
       let   response = formatDecision(decision);
       // AI explanation layer — only for complex/open-ended questions
       const needsAI  = ['general','recovery','adjust','progress'].includes(intent) || msg.split(' ').length > 6;
@@ -2157,8 +2271,19 @@ Write a 4-sentence weekly review: 1) What went well (cite a specific number), 2)
         } catch(e) { console.warn('Feedback upload failed (saved locally)', e); }
       }
       addXP(15);
+      // Contest entry — every feedback submission adds 1 entry into monthly Elite drawing
+      setContestEntries(n => (n || 0) + 1);
+      if (_sb && currentUser) {
+        try {
+          await _sb.from('contest_entries').insert({
+            user_id: currentUser.id,
+            entry_source: 'feedback',
+            metadata: { rating: fbRating, type: fbType, version: 'v28' },
+          });
+        } catch(e) { console.warn('contest entry insert failed', e); }
+      }
       setFbDone(true);
-      showToast('Thanks for the feedback! 🙏 +15 XP', 'success');
+      showToast(`Thanks! +15 XP · +1 contest entry (${(contestEntries||0)+1} total)`, 'success');
     } catch(e) { showToast('Something went wrong, try again', 'error'); }
     setFbSubmitting(false);
   }
@@ -2480,6 +2605,8 @@ Write a 4-sentence weekly review: 1) What went well (cite a specific number), 2)
       try {
         const { data, error } = await _sb.functions.invoke('ai-router', { body });
         if (error) throw error;
+        // Update client-side call counter from server response
+        if (data?._remaining != null) { setAiRemaining(data._remaining); setAiLimit(data._limit ?? 15); }
         // Web-search responses have multi-part content; find text block
         if (extra.textBlock) return (data?.content || []).find(b => b.type === 'text') || null;
         return data?.content?.[0]?.text || null;
@@ -2561,6 +2688,72 @@ Write a 4-sentence weekly review: 1) What went well (cite a specific number), 2)
     setLookingUpFood(false);
   }
 
+  /* ── Voice logging ── */
+  function startVoiceLog() {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) { showToast('Voice not supported in this browser', 'error'); return; }
+    if (voiceListening) {
+      voiceRecogRef.current?.stop();
+      setVoiceListening(false);
+      return;
+    }
+    const rec = new SR();
+    voiceRecogRef.current = rec;
+    rec.continuous = false;
+    rec.interimResults = false;
+    rec.lang = 'en-US';
+    setVoiceListening(true);
+    rec.onresult = async (e) => {
+      const transcript = e.results[0][0].transcript;
+      setVoiceListening(false);
+      setVoiceTranscript(transcript);
+      setVoiceParsing(true);
+      try {
+        const text = await callClaude([{ role: 'user', content:
+          `Parse this spoken food log into individual food items with nutrition.\nSpoken: "${transcript}"\nReply ONLY valid JSON array, no markdown:\n[{"name":"food name with qty","calories":0,"protein":0,"carbs":0,"fat":0}]\nEstimate realistic nutrition for each item at the stated quantity. Include quantities in name (e.g. "2 eggs", "1 cup oatmeal").`
+        }], 400, 'claude-haiku-4-5');
+        if (!text) throw new Error('no response');
+        const items = JSON.parse(text.replace(/```json?|```/g, '').trim());
+        if (!Array.isArray(items) || !items.length) throw new Error('empty');
+        setVoiceItems(items);
+        setShowVoiceConfirm(true);
+      } catch {
+        showToast('Could not parse — try typing it', 'error');
+      }
+      setVoiceParsing(false);
+    };
+    rec.onerror = () => { setVoiceListening(false); setVoiceParsing(false); showToast('Voice error — try again', 'error'); };
+    rec.onend = () => setVoiceListening(false);
+    rec.start();
+  }
+
+  function confirmVoiceLog() {
+    const now = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+    const newEntries = voiceItems.map(item => ({
+      id: Date.now() + Math.random(),
+      date: todayStr(),
+      name: item.name,
+      cal: item.calories || 0,
+      protein: item.protein || 0,
+      carbs: item.carbs || 0,
+      fat: item.fat || 0,
+      time: now,
+    }));
+    setEntries(p => {
+      const next = [...p, ...newEntries];
+      if (p.length === 0) awardBadge('first_log');
+      const totalPro = next.reduce((s, e) => s + (e.protein || 0), 0);
+      if (totalPro >= goal.protein) { awardBadge('protein_goal'); addXP(15); }
+      return next;
+    });
+    addXP(5 * newEntries.length);
+    setTimeout(checkStreakBadge, 100);
+    showToast(`Logged ${newEntries.length} item${newEntries.length > 1 ? 's' : ''} +${5 * newEntries.length} XP 🎤`, 'success');
+    setShowVoiceConfirm(false);
+    setVoiceItems([]);
+    setVoiceTranscript('');
+  }
+
   async function addFoodEntry() {
     if (!logItem.trim()) return;
     let cal  = parseFloat(logCal)  || 0;
@@ -2635,6 +2828,12 @@ Write a 4-sentence weekly review: 1) What went well (cite a specific number), 2)
       return (load('entries_' + ds, [])).length > 0;
     });
     if (days.every(Boolean)) { awardBadge('streak3'); addXP(50); }
+    const days7 = [0,1,2,3,4,5,6].map(offset => {
+      const d = new Date(); d.setDate(d.getDate() - offset);
+      const ds = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+      return (load('entries_' + ds, [])).length > 0;
+    });
+    if (days7.every(Boolean)) { awardBadge('streak7'); addXP(100); }
   }
 
   function checkBudgetBadge(newLog) {
@@ -2910,15 +3109,219 @@ Write a 4-sentence weekly review: 1) What went well (cite a specific number), 2)
     });
   }
 
-  /* look up a recipe by id in saved OR the Tasty Shreds library */
-  function findRecipeById(id) {
-    return saved.find(r => r.id === id) || TASTY_SHREDS_RECIPES.find(r => r.id === id) || null;
+  /* ── cookbook registry ─────────────────────────────────────────────────
+     Static + dynamic cookbooks. Each entry: { id, name, recipes, gated, ... }
+     Tasty Shreds is registered here. User-uploaded cookbooks come from
+     importedCookbooks state and are appended on the fly. */
+  const COOKBOOKS = React.useMemo(() => {
+    const builtins = [
+      { id:'tastyshreds', name:'Tasty Shreds', author:"Kyle Smith", recipes: TASTY_SHREDS_RECIPES, gated:true, builtin:true, tagline:'130 high-protein recipes' },
+    ];
+    const userBooks = (importedCookbooks || []).map(b => ({
+      id: b.id, name: b.name, author: b.author || 'Imported', recipes: b.recipes || [], gated: true, builtin: false, tagline: `${(b.recipes||[]).length} imported recipes`, importedAt: b.importedAt,
+    }));
+    return [...builtins, ...userBooks];
+  }, [importedCookbooks]);
+
+  /* entitlement check — true if user owns this cookbook */
+  function hasCookbook(id) {
+    if (!id) return false;
+    if (cookbookUnlocks.includes(id)) return true;
+    // user always owns books they imported themselves
+    if ((importedCookbooks || []).some(b => b.id === id)) return true;
+    return false;
   }
 
-  /* all recipes available to the planner (saved + full Tasty Shreds library) */
+  /* every recipe the user can actually access right now (saved + unlocked cookbooks) */
+  function getEntitledRecipes() {
+    const out = [];
+    for (const cb of COOKBOOKS) {
+      if (hasCookbook(cb.id)) out.push(...cb.recipes);
+    }
+    return out;
+  }
+
+  /* look up a recipe by id in saved OR any entitled cookbook */
+  function findRecipeById(id) {
+    if (saved.find(r => r.id === id)) return saved.find(r => r.id === id);
+    for (const cb of COOKBOOKS) {
+      if (!hasCookbook(cb.id)) continue;
+      const hit = cb.recipes.find(r => r.id === id);
+      if (hit) return hit;
+    }
+    // fallback: still let lookups inside locked cookbooks succeed for already-saved meal plans
+    for (const cb of COOKBOOKS) {
+      const hit = cb.recipes.find(r => r.id === id);
+      if (hit) return hit;
+    }
+    return null;
+  }
+
+  /* all recipes available to the planner (saved + entitled cookbooks) */
   function allAvailableRecipes() {
     const savedIds = new Set(saved.map(r => r.id));
-    return [...saved, ...TASTY_SHREDS_RECIPES.filter(r => !savedIds.has(r.id))];
+    return [...saved, ...getEntitledRecipes().filter(r => !savedIds.has(r.id))];
+  }
+
+  /* ── cookbook extraction: text → Claude → recipes[] ───────────────────── */
+  async function extractRecipesFromCookbook() {
+    const txt = (cookbookImportText || '').trim();
+    if (!txt) { showToast('Paste cookbook text or upload a file first', 'error'); return; }
+    if (txt.length < 200) { showToast('Need at least a few hundred characters of cookbook text', 'error'); return; }
+    setCookbookImportLoading(true);
+    try {
+      const chunkLimit = 18000; // keep prompt under model context
+      const sample = txt.length > chunkLimit ? txt.slice(0, chunkLimit) : txt;
+      const prompt = `Extract every distinct recipe from the cookbook text below. For each recipe, return a JSON object with these fields:
+- name (string, required)
+- category (one of: breakfast, lunch, dinner, snack, shake, dessert)
+- calories (integer, kcal per serving — estimate from ingredients if not stated)
+- protein (integer, grams per serving)
+- carbs (integer, grams per serving)
+- fat (integer, grams per serving)
+- baseServings (integer, how many servings the recipe makes)
+- ingredients (array of {name: string})
+
+Reply with ONLY valid JSON, no markdown fences, no commentary. Format:
+{"recipes":[{"name":"...","category":"...","calories":0,"protein":0,"carbs":0,"fat":0,"baseServings":1,"ingredients":[{"name":"..."}]}]}
+
+If you cannot find any recipes return {"recipes":[]}.
+
+COOKBOOK TEXT:
+${sample}`;
+
+      const raw = await callClaude([{ role:'user', content: prompt }], 4000, 'claude-haiku-4-5-20251001');
+      let parsed;
+      try {
+        const cleaned = (raw || '').replace(/^```json\s*/i,'').replace(/```$/,'').trim();
+        parsed = JSON.parse(cleaned);
+      } catch(e) {
+        console.warn('extract parse failed', e, raw?.slice(0,200));
+        showToast('AI returned invalid format. Try pasting fewer pages.', 'error');
+        return;
+      }
+      const list = Array.isArray(parsed?.recipes) ? parsed.recipes : [];
+      if (list.length === 0) {
+        showToast('No recipes found in that text', 'error');
+        return;
+      }
+      const cookbookId = `cb_${Date.now()}_${Math.random().toString(36).slice(2,8)}`;
+      const normalized = list.map((r, i) => ({
+        id: `${cookbookId}_${i+1}`,
+        name: String(r.name || 'Untitled recipe').slice(0,120),
+        source: cookbookImportName || 'Imported Cookbook',
+        category: String(r.category || 'lunch'),
+        calories: Number(r.calories) || 0,
+        protein: Number(r.protein) || 0,
+        carbs: Number(r.carbs) || 0,
+        fat: Number(r.fat) || 0,
+        baseServings: Number(r.baseServings) || 1,
+        ingredients: Array.isArray(r.ingredients) ? r.ingredients.filter(x => x && x.name).map(x => ({name: String(x.name).slice(0,200)})) : [],
+        cookbookId,
+      }));
+      setCookbookExtractedRecipes(normalized);
+      setCookbookSelectedIds(new Set(normalized.map(r => r.id))); // default: all selected
+    } catch(e) {
+      console.warn('extractRecipes error', e);
+      showToast('Extract failed — check AI quota', 'error');
+    } finally {
+      setCookbookImportLoading(false);
+    }
+  }
+
+  async function commitImportedCookbook() {
+    const picks = cookbookExtractedRecipes.filter(r => cookbookSelectedIds.has(r.id));
+    if (picks.length === 0) { showToast('Pick at least one recipe', 'error'); return; }
+    const cookbookId = picks[0].cookbookId || `cb_${Date.now()}`;
+    const cbName = (cookbookImportName || 'My Cookbook').slice(0,60);
+    const cbAuthor = (cookbookImportAuthor || 'Personal').slice(0,60);
+
+    setImportedCookbooks(prev => [...prev, {
+      id: cookbookId,
+      name: cbName,
+      author: cbAuthor,
+      recipes: picks,
+      importedAt: new Date().toISOString(),
+    }]);
+    recordCookbookUnlock(cookbookId, cbName, 'upload', picks.length);
+    pushToCommunityPool(picks);
+
+    showToast(`Imported ${picks.length} recipes from ${cbName}`, 'success');
+    setShowCookbookImport(false);
+    setCookbookImportText('');
+    setCookbookImportName('');
+    setCookbookImportAuthor('');
+    setCookbookExtractedRecipes([]);
+    setCookbookSelectedIds(new Set());
+  }
+
+  /* ── community pool: anonymized recipe sharing for cross-user learning ─ */
+  function recipeHash(recipe) {
+    const tags = (recipe.ingredients || []).map(i => (i.name || '').toLowerCase().replace(/[^a-z0-9 ]/g,'').trim()).filter(Boolean).sort().join('|');
+    const macros = `${recipe.calories||0}-${recipe.protein||0}-${recipe.carbs||0}-${recipe.fat||0}`;
+    const raw = `${tags}::${macros}`;
+    let h = 0;
+    for (let i = 0; i < raw.length; i++) { h = ((h<<5)-h) + raw.charCodeAt(i); h |= 0; }
+    return `h_${Math.abs(h).toString(36)}_${raw.length}`;
+  }
+
+  function ingredientTags(recipe) {
+    const stop = new Set(['oz','tbsp','tsp','g','cup','cups','large','small','medium','fresh','sliced','diced','chopped','minced','of','the','a','an','to','and','or','with']);
+    const tags = new Set();
+    for (const ing of (recipe.ingredients || [])) {
+      const words = (ing.name || '').toLowerCase().replace(/[^a-z ]/g,' ').split(/\s+/);
+      for (const w of words) {
+        if (w.length > 2 && !stop.has(w)) tags.add(w);
+      }
+    }
+    return Array.from(tags).slice(0, 12);
+  }
+
+  async function pushToCommunityPool(recipes) {
+    if (!_sb || !currentUser) return;
+    for (const r of recipes) {
+      try {
+        await _sb.rpc('upsert_community_recipe', {
+          p_recipe_hash: recipeHash(r),
+          p_category: r.category || 'lunch',
+          p_calories: Math.round(r.calories || 0),
+          p_protein: Math.round(r.protein || 0),
+          p_carbs: Math.round(r.carbs || 0),
+          p_fat: Math.round(r.fat || 0),
+          p_tags: ingredientTags(r),
+          p_servings: r.baseServings || 1,
+        });
+      } catch(e) {
+        console.warn('community pool upsert failed', e);
+      }
+    }
+  }
+
+  /* find similar recipes from the community pool given a target recipe */
+  async function findSimilarRecipes(target, limit = 5) {
+    if (!_sb || !target) return [];
+    const tags = ingredientTags(target);
+    const cal = Math.round(target.calories || 0);
+    try {
+      const { data, error } = await _sb
+        .from('community_recipes')
+        .select('*')
+        .gte('calories', Math.max(0, cal - 100))
+        .lte('calories', cal + 100)
+        .overlaps('ingredient_tags', tags)
+        .order('popularity', { ascending: false })
+        .limit(limit * 4);
+      if (error) { console.warn('findSimilarRecipes error', error); return []; }
+      const scored = (data || []).map(row => {
+        const overlap = row.ingredient_tags ? row.ingredient_tags.filter(t => tags.includes(t)).length : 0;
+        const macroDist = Math.abs((row.calories || 0) - cal) + Math.abs((row.protein_g || 0) - (target.protein || 0)) * 2;
+        return { row, score: overlap * 50 - macroDist + (row.popularity || 0) };
+      }).sort((a,b) => b.score - a.score).slice(0, limit).map(s => s.row);
+      return scored;
+    } catch(e) {
+      console.warn('findSimilarRecipes exception', e);
+      return [];
+    }
   }
 
   function addToPlan(dateStr, recipe) {
@@ -2952,7 +3355,13 @@ Write a 4-sentence weekly review: 1) What went well (cite a specific number), 2)
 
   /* ── Shopping List ── */
   function buildShoppingFromPlan() {
+    const pantryNames = pantry.map(p => (p.name || p).toLowerCase());
+    const inPantry = name => {
+      const n = name.toLowerCase();
+      return pantryNames.some(p => n.includes(p.split(' ')[0]) || p.includes(n.split(' ')[0]));
+    };
     const items = {};
+    let skipped = 0;
     getPlanWeekDates().forEach(d => {
       (mealPlan[d] || []).forEach(m => {
         const recipe = findRecipeById(m.recipeId);
@@ -2963,6 +3372,7 @@ Write a 4-sentence weekly review: 1) What went well (cite a specific number), 2)
           const ingUnit = ing.unit || (ing.amount ? (ing.amount.match(/[a-zA-Z]+/)?.[0] || 'oz') : 'oz');
           const k = ingItem.toLowerCase();
           if (!k) return;
+          if (inPantry(ingItem)) { skipped++; return; }
           if (!items[k]) items[k] = { item: ingItem, qty: 0, unit: ingUnit, cost: 0 };
           items[k].qty  += ingQty * (m.servings || 1);
           items[k].cost += estimateIngredientCost(ingItem, ingQty * (m.servings || 1), ingUnit);
@@ -2976,7 +3386,7 @@ Write a 4-sentence weekly review: 1) What went well (cite a specific number), 2)
       estCost: Math.round(v.cost * 100) / 100, checked: false
     }));
     setShopList(list);
-    showToast(`Generated ${list.length} items`, 'success');
+    showToast(`${list.length} items added${skipped ? ` · ${skipped} already in pantry` : ''}`, 'success');
   }
 
   function toggleShopItem(id) {
@@ -2989,21 +3399,23 @@ Write a 4-sentence weekly review: 1) What went well (cite a specific number), 2)
   }
 
   function addRecipeToShopList(recipe) {
-    const newItems = (recipe.ingredients || []).map((i, idx) => {
-      const itemName = i.item || i.name || '';
-      const qty = i.qty != null ? i.qty : (parseFloat(i.amount) || 1);
-      const unit = i.unit || (i.amount ? (i.amount.match(/[a-zA-Z]+/)?.[0] || '') : '');
-      const displayText = unit ? `${qty} ${unit} ${itemName}` : (i.amount ? `${i.amount} ${itemName}` : itemName);
-      return {
-        id: Date.now() + idx,
-        text: displayText.trim(),
-        estCost: estimateIngredientCost(itemName, qty, unit || 'oz'),
-        checked: false,
-        source: recipe.name
-      };
-    });
+    const pantryNamesLC = pantry.map(p => (p.name || '').toLowerCase());
+    const ownedIng = nm => {
+      const n = (nm || '').toLowerCase();
+      return n && pantryNamesLC.some(p => n.includes(p.split(' ')[0]) || p.includes(n.split(' ')[0]));
+    };
+    let skipped = 0;
+    const newItems = (recipe.ingredients || [])
+      .filter(i => { if (ownedIng(i.item || i.name)) { skipped++; return false; } return true; })
+      .map((i, idx) => {
+        const itemName = i.item || i.name || '';
+        const qty = i.qty != null ? i.qty : (parseFloat(i.amount) || 1);
+        const unit = i.unit || (i.amount ? (i.amount.match(/[a-zA-Z]+/)?.[0] || '') : '');
+        const displayText = unit ? `${qty} ${unit} ${itemName}` : (i.amount ? `${i.amount} ${itemName}` : itemName);
+        return { id: Date.now() + idx, text: displayText.trim(), estCost: estimateIngredientCost(itemName, qty, unit || 'oz'), checked: false, source: recipe.name };
+      });
     setShopList(p => [...p, ...newItems]);
-    showToast(`Added ${newItems.length} ingredients to shopping list! 🛒`, 'success');
+    showToast(`Added ${newItems.length} ingredients${skipped ? ` · ${skipped} in pantry` : ''} 🛒`, 'success');
   }
 
   function orderOnWalmart() {
@@ -3277,13 +3689,14 @@ Write a 4-sentence weekly review: 1) What went well (cite a specific number), 2)
 
         <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 18, padding: 16, border: '1px solid rgba(255,255,255,0.06)', marginBottom: 14 }}>
           <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
-            <input value={logItem} onChange={e => setLogItem(e.target.value)} placeholder="Food name — or tap 📷 to scan"
+            <input value={logItem} onChange={e => setLogItem(e.target.value)} placeholder="Food name — or tap 🎤 to speak"
               style={{ ...inputS, flex: 1 }} onKeyDown={e => e.key === 'Enter' && addFoodEntry()} />
+            <button onClick={startVoiceLog} style={{ width: 46, height: 46, borderRadius: 12, border: `1px solid ${voiceListening ? '#FF6B4A' : 'rgba(75,222,128,0.35)'}`, background: voiceListening ? 'rgba(255,107,74,0.2)' : 'rgba(75,222,128,0.1)', color: voiceListening ? '#FF6B4A' : '#4BDE80', fontSize: 20, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, animation: voiceListening ? 'pulse 1s infinite' : 'none' }}>🎤</button>
             <button onClick={() => setShowBarcode(true)} style={{ width: 46, height: 46, borderRadius: 12, border: '1px solid rgba(75,222,128,0.35)', background: 'rgba(75,222,128,0.1)', color: '#4BDE80', fontSize: 20, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>📷</button>
           </div>
-          {lookingUpFood && (
-            <div style={{ textAlign: 'center', padding: '6px 0 8px', fontSize: 12, color: '#4A9EFF', letterSpacing: 0.5 }}>
-              🔍 Looking up nutrition…
+          {(voiceListening || voiceParsing || lookingUpFood) && (
+            <div style={{ textAlign: 'center', padding: '6px 0 8px', fontSize: 12, color: voiceListening ? '#FF6B4A' : '#4A9EFF', letterSpacing: 0.5 }}>
+              {voiceListening ? '🎤 Listening… tap mic again to stop' : voiceParsing ? '🧠 Parsing foods…' : '🔍 Looking up nutrition…'}
             </div>
           )}
           {barcodeData && (
@@ -3356,12 +3769,92 @@ Write a 4-sentence weekly review: 1) What went well (cite a specific number), 2)
 
         {trainTab === 'today' && (
           <div style={{ flex: 1, overflow: 'hidden' }}>
-            <WorkoutTimerApp onBack={() => setTrainTab('today')} onSave={saveWorkoutSession} customRoutines={customRoutines} />
+            {(() => {
+              const DAYS = ['sun','mon','tue','wed','thu','fri','sat'];
+              const todayKey = DAYS[getTodayIdx()];
+              const scheduledId = workoutSchedule[todayKey];
+              const allR = [...WORKOUTS.map(w => ({ id: w.focus, name: w.focus, color: w.color, idx: WORKOUTS.indexOf(w) })), ...customRoutines.map((r, i) => ({ id: r.id || r.name, name: r.name, color: r.color, idx: WORKOUTS.length + i }))];
+              const scheduledRoutine = scheduledId ? allR.find(r => r.id === scheduledId) : null;
+              return scheduledRoutine ? (
+                <div style={{ padding: '10px 16px 0', flexShrink: 0 }}>
+                  <div style={{ background: `linear-gradient(120deg,${scheduledRoutine.color}22,rgba(255,255,255,0.03))`, borderRadius: 14, padding: '10px 14px', border: `1px solid ${scheduledRoutine.color}50`, display: 'flex', alignItems: 'center', gap: 12 }}>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 9, color: scheduledRoutine.color, letterSpacing: 2, fontWeight: 700, marginBottom: 2 }}>📅 TODAY'S PLAN</div>
+                      <div style={{ fontFamily: "'Oswald',sans-serif", fontSize: 15, color: '#fff', fontWeight: 700 }}>{scheduledRoutine.name}</div>
+                    </div>
+                    <div style={{ fontSize: 20 }}>↓</div>
+                  </div>
+                </div>
+              ) : null;
+            })()}
+            <WorkoutTimerApp onBack={() => setTrainTab('today')} onSave={saveWorkoutSession} customRoutines={customRoutines} scheduledWorkoutId={workoutSchedule[['sun','mon','tue','wed','thu','fri','sat'][getTodayIdx()]] || null} />
           </div>
         )}
 
         {trainTab === 'routines' && (
           <div style={{ flex: 1, overflowY: 'auto', padding: '14px 16px' }}>
+            {/* Weekly Schedule Grid */}
+            {(() => {
+              const DAYS = ['sun','mon','tue','wed','thu','fri','sat'];
+              const DAY_LABELS = ['S','M','T','W','T','F','S'];
+              const todayDayKey = DAYS[getTodayIdx()];
+              const allRoutines = [...WORKOUTS.map(w => ({ id: w.focus, name: w.focus, color: w.color, isPreset: true })), ...customRoutines.map(r => ({ id: r.id || r.name, name: r.name, color: r.color, isPreset: false }))];
+              return (
+                <div style={{ marginBottom: 18 }}>
+                  <div style={{ fontSize: 10, color: '#4a6a7a', letterSpacing: 1, marginBottom: 10 }}>WEEKLY SCHEDULE</div>
+                  <div style={{ display: 'flex', gap: 5, marginBottom: 10 }}>
+                    {DAYS.map((day, i) => {
+                      const isToday = day === todayDayKey;
+                      const assigned = workoutSchedule[day];
+                      const routine = assigned ? allRoutines.find(r => r.id === assigned) : null;
+                      return (
+                        <div key={day} onClick={() => setSchedDayPicker(day)}
+                          style={{ flex: 1, borderRadius: 10, padding: '8px 2px', textAlign: 'center', cursor: 'pointer', border: `1px solid ${isToday ? '#FF6B4A' : routine ? routine.color + '40' : 'rgba(255,255,255,0.07)'}`, background: isToday ? 'rgba(255,107,74,0.1)' : routine ? routine.color + '12' : 'rgba(255,255,255,0.03)' }}>
+                          <div style={{ fontSize: 10, color: isToday ? '#FF6B4A' : '#555', fontWeight: isToday ? 700 : 400, marginBottom: 4 }}>{DAY_LABELS[i]}</div>
+                          {routine ? (
+                            <div style={{ fontSize: 8, color: routine.color, fontWeight: 700, lineHeight: 1.2, wordBreak: 'break-word' }}>{routine.name.slice(0,6)}</div>
+                          ) : (
+                            <div style={{ fontSize: 8, color: '#333' }}>—</div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div style={{ fontSize: 10, color: '#4a6a7a', textAlign: 'center' }}>Tap a day to assign a routine</div>
+                  {/* Day picker modal */}
+                  {schedDayPicker && (
+                    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', zIndex: 200, display: 'flex', alignItems: 'flex-end' }} onClick={() => setSchedDayPicker(null)}>
+                      <div style={{ width: '100%', background: '#0d1117', borderRadius: '20px 20px 0 0', padding: 20, maxHeight: '70vh', overflowY: 'auto' }} onClick={e => e.stopPropagation()}>
+                        <div style={{ fontFamily: "'Oswald',sans-serif", fontSize: 16, color: '#fff', marginBottom: 14 }}>
+                          ASSIGN — {schedDayPicker.toUpperCase()}
+                        </div>
+                        <div onClick={() => { setWorkoutSchedule(p => { const n = {...p}; delete n[schedDayPicker]; return n; }); setSchedDayPicker(null); }}
+                          style={{ padding: '12px 14px', borderRadius: 12, background: 'rgba(255,255,255,0.04)', marginBottom: 8, cursor: 'pointer', color: '#555', fontSize: 13 }}>
+                          🛌 Rest Day
+                        </div>
+                        <div style={{ fontSize: 10, color: '#4a6a7a', letterSpacing: 1, marginBottom: 6 }}>CUSTOM</div>
+                        {customRoutines.map(r => (
+                          <div key={r.id||r.name} onClick={() => { setWorkoutSchedule(p => ({...p, [schedDayPicker]: r.id||r.name})); setSchedDayPicker(null); }}
+                            style={{ padding: '12px 14px', borderRadius: 12, background: workoutSchedule[schedDayPicker] === (r.id||r.name) ? r.color + '22' : 'rgba(255,255,255,0.04)', marginBottom: 6, cursor: 'pointer', border: `1px solid ${workoutSchedule[schedDayPicker] === (r.id||r.name) ? r.color + '60' : 'transparent'}` }}>
+                            <div style={{ fontFamily: "'Oswald',sans-serif", fontSize: 14, color: r.color }}>{r.name}</div>
+                            <div style={{ fontSize: 11, color: '#555' }}>{r.exercises.length} exercises</div>
+                          </div>
+                        ))}
+                        <div style={{ fontSize: 10, color: '#4a6a7a', letterSpacing: 1, marginTop: 8, marginBottom: 6 }}>BUILT-IN</div>
+                        {WORKOUTS.map((w, i) => (
+                          <div key={i} onClick={() => { setWorkoutSchedule(p => ({...p, [schedDayPicker]: w.focus})); setSchedDayPicker(null); }}
+                            style={{ padding: '12px 14px', borderRadius: 12, background: workoutSchedule[schedDayPicker] === w.focus ? w.color + '22' : 'rgba(255,255,255,0.04)', marginBottom: 6, cursor: 'pointer', border: `1px solid ${workoutSchedule[schedDayPicker] === w.focus ? w.color + '60' : 'transparent'}` }}>
+                            <div style={{ fontFamily: "'Oswald',sans-serif", fontSize: 14, color: w.color }}>{w.focus}</div>
+                            <div style={{ fontSize: 11, color: '#555' }}>{w.exercises.length} exercises · {w.tag}</div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+
             {/* Header */}
             <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16 }}>
               <div>
@@ -3504,12 +3997,10 @@ Write a 4-sentence weekly review: 1) What went well (cite a specific number), 2)
   /* ── COOKBOOK ── */
   function CookbookScreen() {
     const allRecipes = [...saved, ...onlineResults.filter(o => !saved.find(s => s.id === o.id))];
-    const shredsFiltered = shredsSearch.trim()
-      ? TASTY_SHREDS_RECIPES.filter(r => r.name.toLowerCase().includes(shredsSearch.toLowerCase()) || r.ingredients.some(i => (i.name||'').toLowerCase().includes(shredsSearch.toLowerCase())))
-      : TASTY_SHREDS_RECIPES;
 
     if (activeRecipe) {
       const cost = estimateRecipeCost(activeRecipe);
+      const srv = recipeServings;
       return (
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
           <div style={{ padding: '14px 16px', display: 'flex', alignItems: 'center', gap: 10, borderBottom: '1px solid rgba(255,255,255,0.06)', flexShrink: 0 }}>
@@ -3518,12 +4009,21 @@ Write a 4-sentence weekly review: 1) What went well (cite a specific number), 2)
             <StarRating id={activeRecipe.id} ratings={ratings} setRatings={setRatings} />
           </div>
           <div style={{ flex: 1, overflowY: 'auto', padding: '14px 16px' }}>
+            {/* Serving size stepper */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 14, marginBottom: 12, background: 'rgba(255,255,255,0.04)', borderRadius: 12, padding: '8px 14px' }}>
+              <button onClick={() => setRecipeServings(s => Math.max(0.5, s - 0.5))} style={{ width: 30, height: 30, borderRadius: '50%', border: '1px solid rgba(255,255,255,0.15)', background: 'rgba(255,255,255,0.07)', color: '#fff', fontSize: 18, cursor: 'pointer', lineHeight: 1 }}>−</button>
+              <div style={{ textAlign: 'center' }}>
+                <div style={{ fontFamily: "'Oswald',sans-serif", fontSize: 18, color: '#fff', fontWeight: 700 }}>{srv % 1 === 0 ? srv : srv.toFixed(1)}</div>
+                <div style={{ fontSize: 9, color: '#555', letterSpacing: 1 }}>SERVINGS</div>
+              </div>
+              <button onClick={() => setRecipeServings(s => s + 0.5)} style={{ width: 30, height: 30, borderRadius: '50%', border: '1px solid rgba(255,255,255,0.15)', background: 'rgba(255,255,255,0.07)', color: '#fff', fontSize: 18, cursor: 'pointer', lineHeight: 1 }}>+</button>
+            </div>
             <div style={{ display: 'flex', gap: 6, marginBottom: 14, flexWrap: 'wrap' }}>
-              {[[`${fmt(activeRecipe.calories)}`, 'Cal', '#FF6B4A'],
-                [`${fmt(activeRecipe.protein)}g`, 'Prot', '#4A9EFF'],
-                [`${fmt(activeRecipe.carbs)}g`, 'Carb', '#A855F7'],
-                [`${fmt(activeRecipe.fat)}g`, 'Fat', '#F5C842'],
-                [`$${cost.toFixed(2)}`, '/srv', '#4BDE80']].map(([v, l, c]) => (
+              {[[`${fmt(Math.round((activeRecipe.calories||0)*srv))}`, 'Cal', '#FF6B4A'],
+                [`${fmt(Math.round((activeRecipe.protein||0)*srv))}g`, 'Prot', '#4A9EFF'],
+                [`${fmt(Math.round((activeRecipe.carbs||0)*srv))}g`, 'Carb', '#A855F7'],
+                [`${fmt(Math.round((activeRecipe.fat||0)*srv))}g`, 'Fat', '#F5C842'],
+                [`$${(cost*srv).toFixed(2)}`, '/total', '#4BDE80']].map(([v, l, c]) => (
                 <div key={l} style={{ flex: '1 0 58px', background: `${c}12`, borderRadius: 12, padding: '10px 4px', textAlign: 'center', border: `1px solid ${c}25` }}>
                   <div style={{ fontSize: 15, fontFamily: "'Bebas Neue',sans-serif", color: c }}>{v}</div>
                   <div style={{ fontSize: 9, color: '#555' }}>{l}</div>
@@ -3535,17 +4035,22 @@ Write a 4-sentence weekly review: 1) What went well (cite a specific number), 2)
               <div style={{ marginBottom: 14 }}>
                 <div style={{ fontSize: 10, color: '#4a6a7a', letterSpacing: 1, marginBottom: 8 }}>INGREDIENTS</div>
                 {activeRecipe.ingredients.map((ing, i) => {
-                  // Support both {name,amount} (AI) and {item,qty,unit} (MDB) formats
+                  // Support both {name,amount} (AI) and {item,qty,unit} (MDB) formats, scale by srv
+                  const scaledQty = ing.qty != null ? Math.round(ing.qty * srv * 10) / 10 : null;
+                  const scaledAmount = ing.amount && srv !== 1
+                    ? (() => { const n = parseFloat(ing.amount); return n ? (Math.round(n * srv * 10) / 10) + ing.amount.replace(/^[\d.]+/, '') : ing.amount; })()
+                    : ing.amount;
                   const label = ing.name
-                    ? `${ing.amount ? ing.amount + ' ' : ''}${ing.name}`
-                    : `${ing.qty || ''} ${ing.unit || ''} ${ing.item || ''}`.trim();
+                    ? `${scaledAmount ? scaledAmount + ' ' : ''}${ing.name}`
+                    : `${scaledQty !== null ? scaledQty : ''} ${ing.unit || ''} ${ing.item || ''}`.trim();
                   const c = ing.name
                     ? estimateIngredientCost(ing.name, 1, 'serving')
                     : estimateIngredientCost(ing.item, ing.qty, ing.unit);
+                  const owned = ingInPantry(ing.name || ing.item);
                   return (
-                    <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '7px 0', borderBottom: '1px solid rgba(255,255,255,0.04)', fontSize: 13, color: '#ccc' }}>
-                      <span>{label}</span>
-                      {c > 0 && <span style={{ color: '#4BDE80', fontSize: 11 }}>${c.toFixed(2)}</span>}
+                    <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '7px 0', borderBottom: '1px solid rgba(255,255,255,0.04)', fontSize: 13, color: owned ? '#4BDE80' : '#ccc' }}>
+                      <span>{owned ? '✓ ' : ''}{label}</span>
+                      {owned ? <span style={{ fontSize: 10, color: '#4BDE80' }}>IN PANTRY</span> : c > 0 ? <span style={{ color: '#666', fontSize: 11 }}>${c.toFixed(2)}</span> : null}
                     </div>
                   );
                 })}
@@ -3578,8 +4083,8 @@ Write a 4-sentence weekly review: 1) What went well (cite a specific number), 2)
             })()}
 
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
-              <button onClick={() => { addRecipeToLog(activeRecipe, 1); setScreen('log'); }} style={{ flex: 1, padding: 13, borderRadius: 13, border: 'none', background: '#4BDE80', color: '#000', fontFamily: "'Oswald',sans-serif", fontSize: 14, fontWeight: 700, cursor: 'pointer' }}>
-                + LOG IT
+              <button onClick={() => { addRecipeToLog(activeRecipe, srv); setScreen('log'); }} style={{ flex: 1, padding: 13, borderRadius: 13, border: 'none', background: '#4BDE80', color: '#000', fontFamily: "'Oswald',sans-serif", fontSize: 14, fontWeight: 700, cursor: 'pointer' }}>
+                + LOG {srv !== 1 ? `${srv % 1 === 0 ? srv : srv.toFixed(1)} SRV` : 'IT'}
               </button>
               {!saved.find(s => s.id === activeRecipe.id) && (
                 <button onClick={() => { setSaved(p => { if (p.length === 0) { awardBadge('first_recipe'); addXP(5); } return [activeRecipe, ...p]; }); showToast('Saved to cookbook +5 XP', 'success'); }} style={{ flex: 1, padding: 13, borderRadius: 13, border: '1px solid rgba(74,158,255,0.4)', background: 'rgba(74,158,255,0.1)', color: '#4A9EFF', fontFamily: "'Oswald',sans-serif", fontSize: 14, fontWeight: 700, cursor: 'pointer' }}>
@@ -3640,13 +4145,23 @@ Write a 4-sentence weekly review: 1) What went well (cite a specific number), 2)
       );
     }
 
+    // Computed once for all recipe cards — pantry fuzzy match helper
+    const pantryNamesLC = pantry.map(p => (p.name || p).toLowerCase());
+    const ingInPantry = nm => {
+      const n = (nm || '').toLowerCase();
+      return n && pantryNamesLC.some(p => n.includes(p.split(' ')[0]) || p.includes(n.split(' ')[0]));
+    };
+
     // Shared recipe card renderer
     function RecipeCard({ r }) {
       const cost = estimateRecipeCost(r);
       const isSaved = !!saved.find(s => s.id === r.id);
       const isShreds = r.source === 'Tasty Shreds';
+      const ings = r.ingredients || [];
+      const pantryHits = ings.filter(ing => ingInPantry(ing.name || ing.item)).length;
+      const pantryPct = ings.length > 0 ? Math.round((pantryHits / ings.length) * 100) : 0;
       return (
-        <div onClick={() => { setRecipeSwaps(null); setActiveRecipe(r); }} style={{ background: isShreds ? 'rgba(255,107,74,0.05)' : 'rgba(255,255,255,0.03)', borderRadius: 16, padding: 14, marginBottom: 10, border: `1px solid ${isShreds ? 'rgba(255,107,74,0.2)' : r.source === 'web' ? 'rgba(74,158,255,0.15)' : r.source === 'claude' ? 'rgba(168,85,247,0.15)' : 'rgba(255,255,255,0.06)'}`, cursor: 'pointer' }}>
+        <div onClick={() => { setRecipeSwaps(null); setActiveRecipe(r); setRecipeServings(1); }} style={{ background: isShreds ? 'rgba(255,107,74,0.05)' : 'rgba(255,255,255,0.03)', borderRadius: 16, padding: 14, marginBottom: 10, border: `1px solid ${isShreds ? 'rgba(255,107,74,0.2)' : r.source === 'web' ? 'rgba(74,158,255,0.15)' : r.source === 'claude' ? 'rgba(168,85,247,0.15)' : 'rgba(255,255,255,0.06)'}`, cursor: 'pointer' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 5 }}>
             <div style={{ flex: 1 }}>
               <div style={{ fontSize: 14, fontWeight: 600, color: '#fff', marginBottom: 2 }}>{r.name}</div>
@@ -3655,6 +4170,7 @@ Write a 4-sentence weekly review: 1) What went well (cite a specific number), 2)
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
               <StarRating id={r.id} ratings={ratings} setRatings={setRatings} size={12} />
               {isSaved && <span style={{ fontSize: 9, color: '#4BDE80', border: '1px solid rgba(75,222,128,0.3)', borderRadius: 4, padding: '1px 5px' }}>SAVED</span>}
+              {pantryHits > 0 && <span style={{ fontSize: 9, color: '#F5C842', border: '1px solid rgba(245,200,66,0.3)', borderRadius: 4, padding: '1px 5px' }}>🥫 {pantryPct}% PANTRY</span>}
             </div>
           </div>
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
@@ -3673,29 +4189,60 @@ Write a 4-sentence weekly review: 1) What went well (cite a specific number), 2)
 
         {/* Tab bar */}
         <div style={{ display: 'flex', padding: '0 16px', paddingTop: 12, flexShrink: 0, borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
-          {[['shreds','🔥 TASTY SHREDS'],['my','📖 MY RECIPES'],['search','🔍 SEARCH']].map(([k,l]) => (
-            <button key={k} onClick={() => setCookbookTab(k)} style={{ flex: 1, padding: '10px 4px', border: 'none', borderBottom: `2px solid ${cookbookTab === k ? '#FF6B4A' : 'rgba(255,255,255,0.06)'}`, background: 'transparent', color: cookbookTab === k ? '#FF6B4A' : '#555', fontFamily: "'Oswald',sans-serif", fontSize: 11, fontWeight: 600, cursor: 'pointer', letterSpacing: 0.5 }}>
+          {[['shreds','📚 COOKBOOKS'],['my','📖 MY RECIPES'],['search','🔍 SEARCH']].map(([k,l]) => (
+            <button key={k} onClick={() => { setCookbookTab(k); setSelectedCookbookId(null); }} style={{ flex: 1, padding: '10px 4px', border: 'none', borderBottom: `2px solid ${cookbookTab === k ? '#FF6B4A' : 'rgba(255,255,255,0.06)'}`, background: 'transparent', color: cookbookTab === k ? '#FF6B4A' : '#555', fontFamily: "'Oswald',sans-serif", fontSize: 11, fontWeight: 600, cursor: 'pointer', letterSpacing: 0.5 }}>
               {l}
             </button>
           ))}
         </div>
 
-        {/* TASTY SHREDS tab */}
-        {cookbookTab === 'shreds' && (
-          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-            <div style={{ padding: '10px 16px', flexShrink: 0 }}>
-              <input value={shredsSearch} onChange={e => setShredsSearch(e.target.value)} placeholder="Search 130 Tasty Shreds recipes…"
-                style={{ width: '100%', padding: '10px 14px', borderRadius: 12, border: '1px solid rgba(255,107,74,0.25)', background: 'rgba(255,107,74,0.05)', color: '#fff', fontSize: 13, fontFamily: 'inherit', outline: 'none', boxSizing: 'border-box' }} />
-              <div style={{ fontSize: 10, color: '#555', marginTop: 6, textAlign: 'center' }}>130 high-protein recipes · Kyle Smith's Tasty Shreds cookbook</div>
-            </div>
-            <div style={{ flex: 1, overflowY: 'auto', padding: '4px 16px' }}>
-              {shredsFiltered.length === 0 ? (
-                <div style={{ textAlign: 'center', padding: '40px 0', color: '#444' }}>No recipes match "{shredsSearch}"</div>
-              ) : shredsFiltered.map(r => <RecipeCard key={r.id} r={r} />)}
-              <div style={{ height: 80 }} />
-            </div>
+        {/* COOKBOOKS tab — library grid + drill-down */}
+        {cookbookTab === 'shreds' && !selectedCookbookId && (
+          <div style={{ flex: 1, overflowY: 'auto', padding: '14px 16px' }}>
+            <button onClick={() => setShowCookbookImport(true)} style={{ width:'100%', padding:'14px', borderRadius:14, border:'1.5px dashed rgba(168,85,247,0.5)', background:'rgba(168,85,247,0.08)', color:'#A855F7', fontFamily:"'Oswald',sans-serif", fontSize:13, fontWeight:700, letterSpacing:0.6, cursor:'pointer', marginBottom:14 }}>
+              + UPLOAD A COOKBOOK
+            </button>
+            <div style={{ fontSize:10, color:'#4a6a7a', letterSpacing:0.8, marginBottom:8 }}>YOUR LIBRARY</div>
+            {COOKBOOKS.map(cb => {
+              const owned = hasCookbook(cb.id);
+              return (
+                <div key={cb.id} onClick={() => owned ? setSelectedCookbookId(cb.id) : setShowCookbookPaywall(cb)} style={{ background:'rgba(255,255,255,0.04)', borderRadius:14, padding:'14px 16px', border:`1px solid ${owned ? 'rgba(255,107,74,0.25)' : 'rgba(255,255,255,0.07)'}`, marginBottom:10, cursor:'pointer', display:'flex', alignItems:'center', gap:14 }}>
+                  <div style={{ fontSize:30 }}>{owned ? '🔥' : '🔒'}</div>
+                  <div style={{ flex:1 }}>
+                    <div style={{ fontFamily:"'Oswald',sans-serif", fontSize:15, color: owned ? '#fff' : '#888' }}>{cb.name}</div>
+                    <div style={{ fontSize:11, color:'#4a6a7a', marginTop:2 }}>{cb.author} · {cb.tagline}</div>
+                  </div>
+                  {!owned && <div style={{ fontSize:10, padding:'5px 10px', borderRadius:18, background:'rgba(245,200,66,0.1)', color:'#F5C842', fontWeight:700, letterSpacing:0.5 }}>UNLOCK</div>}
+                </div>
+              );
+            })}
+            <div style={{ height: 80 }} />
           </div>
         )}
+
+        {cookbookTab === 'shreds' && selectedCookbookId && (() => {
+          const cb = COOKBOOKS.find(c => c.id === selectedCookbookId);
+          if (!cb) { setSelectedCookbookId(null); return null; }
+          const filtered = shredsSearch
+            ? cb.recipes.filter(r => r.name.toLowerCase().includes(shredsSearch.toLowerCase()) || r.ingredients.some(i => (i.name||'').toLowerCase().includes(shredsSearch.toLowerCase())))
+            : cb.recipes;
+          return (
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+              <div style={{ padding: '10px 16px', flexShrink: 0 }}>
+                <button onClick={() => setSelectedCookbookId(null)} style={{ background:'transparent', border:'none', color:'#A855F7', fontSize:12, cursor:'pointer', padding:0, marginBottom:8 }}>‹ All cookbooks</button>
+                <input value={shredsSearch} onChange={e => setShredsSearch(e.target.value)} placeholder={`Search ${cb.recipes.length} ${cb.name} recipes…`}
+                  style={{ width: '100%', padding: '10px 14px', borderRadius: 12, border: '1px solid rgba(255,107,74,0.25)', background: 'rgba(255,107,74,0.05)', color: '#fff', fontSize: 13, fontFamily: 'inherit', outline: 'none', boxSizing: 'border-box' }} />
+                <div style={{ fontSize: 10, color: '#555', marginTop: 6, textAlign: 'center' }}>{cb.recipes.length} recipes · {cb.author}</div>
+              </div>
+              <div style={{ flex: 1, overflowY: 'auto', padding: '4px 16px' }}>
+                {filtered.length === 0 ? (
+                  <div style={{ textAlign: 'center', padding: '40px 0', color: '#444' }}>No recipes match "{shredsSearch}"</div>
+                ) : filtered.map(r => <RecipeCard key={r.id} r={r} />)}
+                <div style={{ height: 80 }} />
+              </div>
+            </div>
+          );
+        })()}
 
         {/* MY RECIPES tab */}
         {cookbookTab === 'my' && (
@@ -4051,7 +4598,12 @@ Write a 4-sentence weekly review: 1) What went well (cite a specific number), 2)
     }
 
     function doCheckIn(id) {
-      setMyChallenges(p => p.map(c => c.id === id ? { ...c, checkins: [...new Set([...(c.checkins||[]), todayStr()])] } : c));
+      setMyChallenges(p => p.map(c => {
+        if (c.id !== id) return c;
+        const updated = { ...c, checkins: [...new Set([...(c.checkins||[]), todayStr()])] };
+        if (updated.checkins.length >= (updated.durationDays || 7)) awardBadge('first_challenge_won');
+        return updated;
+      }));
       showToast('Checked in! 💪', 'success');
     }
 
@@ -4246,6 +4798,120 @@ Write a 4-sentence weekly review: 1) What went well (cite a specific number), 2)
               </div>
             );
           })}
+        </div>
+      </div>
+    );
+  }
+
+  /* ══════════════════════════════════════════════
+     SIGNUP GATE — first wall users hit. No anonymous use.
+  ══════════════════════════════════════════════ */
+  function SignupGate() {
+    const inp = { width:'100%', padding:'14px 16px', borderRadius:14, border:'1px solid rgba(255,255,255,0.12)', background:'rgba(255,255,255,0.06)', color:'#fff', fontSize:15, fontFamily:'inherit', outline:'none', marginBottom:12, boxSizing:'border-box' };
+    return (
+      <div style={{ minHeight:'100vh', display:'flex', flexDirection:'column', justifyContent:'center', padding:'40px 24px', background:'linear-gradient(180deg,#0c0c18 0%,#1a1530 100%)' }}>
+        <div style={{ textAlign:'center', marginBottom:32 }}>
+          <div style={{ fontSize:54, marginBottom:8 }}>💪</div>
+          <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:38, color:'#fff', letterSpacing:2, lineHeight:1 }}>LEVEL UP</div>
+          <div style={{ fontFamily:"'Oswald',sans-serif", fontSize:14, color:'#A855F7', letterSpacing:3, marginTop:4 }}>FITNESS</div>
+          <div style={{ fontSize:13, color:'#aaa', marginTop:18, lineHeight:1.5 }}>Train. Eat. Track. Win.<br/>30-day free trial of Pro on every new account.</div>
+        </div>
+
+        <div style={{ display:'flex', background:'rgba(255,255,255,0.04)', borderRadius:12, padding:4, marginBottom:18, maxWidth:380, width:'100%', margin:'0 auto 18px' }}>
+          {[['signup','CREATE ACCOUNT'],['signin','SIGN IN']].map(([m,l]) => (
+            <button key={m} onClick={() => setSignupStep(m)} style={{ flex:1, padding:'11px 8px', borderRadius:9, border:'none', background: signupStep===m ? '#A855F7' : 'transparent', color: signupStep===m ? '#000' : '#888', fontFamily:"'Oswald',sans-serif", fontSize:12, fontWeight:700, cursor:'pointer', letterSpacing:0.5 }}>{l}</button>
+          ))}
+        </div>
+
+        <div style={{ maxWidth:380, width:'100%', margin:'0 auto' }}>
+          <input type="email" value={authEmail} onChange={e => setAuthEmail(e.target.value)} placeholder="Email address" style={inp} autoCapitalize="off" />
+          <input type="password" value={authPassword} onChange={e => setAuthPassword(e.target.value)} placeholder={signupStep === 'signup' ? "Password (8+ chars)" : "Password"} style={inp} onKeyDown={e => e.key === 'Enter' && (signupStep === 'signin' ? handleSignIn() : handleSignUp())} />
+
+          <button onClick={() => signupStep === 'signin' ? handleSignIn() : handleSignUp()} disabled={authLoading || !authEmail || !authPassword || (signupStep === 'signup' && authPassword.length < 8)} style={{ width:'100%', padding:16, borderRadius:14, border:'none', background: authLoading ? '#333' : (signupStep==='signup'?'#4BDE80':'#4A9EFF'), color:'#000', fontFamily:"'Oswald',sans-serif", fontSize:17, fontWeight:800, cursor: authLoading?'default':'pointer', letterSpacing:0.5, marginBottom:14 }}>
+            {authLoading ? '⏳ …' : signupStep==='signup' ? 'CREATE ACCOUNT — START TRIAL' : 'SIGN IN'}
+          </button>
+
+          <button onClick={handleGoogleAuth} style={{ width:'100%', padding:14, borderRadius:14, border:'1px solid rgba(255,255,255,0.12)', background:'rgba(255,255,255,0.04)', color:'#fff', fontFamily:"'Oswald',sans-serif", fontSize:15, fontWeight:700, cursor:'pointer', letterSpacing:0.5, marginBottom:14 }}>
+            <span style={{ fontSize:17, marginRight:8 }}>G</span> CONTINUE WITH GOOGLE
+          </button>
+
+          {signupStep === 'signin' && (
+            <button onClick={handleForgotPassword} style={{ background:'transparent', border:'none', color:'#4A9EFF', fontSize:12, cursor:'pointer', width:'100%', textAlign:'center' }}>Forgot password?</button>
+          )}
+
+          <div style={{ marginTop:24, padding:'14px 16px', background:'rgba(245,200,66,0.06)', borderRadius:12, border:'1px solid rgba(245,200,66,0.2)' }}>
+            <div style={{ fontSize:11, color:'#F5C842', fontWeight:700, letterSpacing:0.8, marginBottom:5 }}>🎁 LAUNCH BONUS</div>
+            <div style={{ fontSize:12, color:'#ddd', lineHeight:1.5 }}>Submit feedback during your trial → enter monthly drawing for <strong style={{color:'#F5C842'}}>3 months of Elite free</strong>.</div>
+          </div>
+
+          <div style={{ fontSize:10, color:'#3a4a5a', textAlign:'center', marginTop:18, lineHeight:1.5 }}>
+            By continuing you agree to fair-use AI limits and the<br/>privacy policy. Cancel trial anytime — no card needed.
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  /* ══════════════════════════════════════════════
+     PLAN PICKER — shown after signup, before onboarding
+  ══════════════════════════════════════════════ */
+  function PlanPickerScreen() {
+    const plans = [
+      { tier:'free', label:'FREE', price:'$0', sub:'forever', calls:'15 AI calls/day', features:['Basic AI coaching','Food lookup','Recipe gen','Workout tracking'], color:'#4a6a7a', cta:'CONTINUE WITH FREE' },
+      { tier:'pro_trial', label:'PRO', price:'$9.99', sub:'after 30-day trial', calls:'100 AI calls/day', features:['Everything in Free','Meal planning','No ads','Priority cloud sync'], color:'#4BDE80', cta:'START 30-DAY PRO TRIAL', highlight:'30 days FREE — no card needed' },
+      { tier:'elite_trial', label:'ELITE', price:'$19.99', sub:'after 30-day trial', calls:'Unlimited AI calls', features:['Everything in Pro','Claude Sonnet coaching','Advanced analytics','Early access to features','Cookbook unlocks included'], color:'#A855F7', cta:'START 30-DAY ELITE TRIAL', highlight:'BEST VALUE · 30 days FREE' },
+    ];
+    function choosePlan(tier) {
+      const now = new Date().toISOString();
+      if (tier === 'free') {
+        setUserPlan('free');
+        setTrialPlan(null);
+        setTrialStartedAt(null);
+      } else {
+        const planName = tier === 'pro_trial' ? 'pro' : 'elite';
+        setUserPlan(planName);
+        setTrialPlan(planName);
+        setTrialStartedAt(now);
+      }
+      setUserPlanChosen(true);
+      // Persist to Supabase profile if available
+      if (_sb && currentUser) {
+        const target = tier === 'free' ? 'free' : (tier === 'pro_trial' ? 'pro' : 'elite');
+        _sb.from('profiles').upsert({
+          id: currentUser.id,
+          plan: target,
+          trial_started_at: tier === 'free' ? null : now,
+          trial_plan: tier === 'free' ? null : target,
+        }, { onConflict: 'id' }).then(({ error }) => { if (error) console.warn('plan upsert', error); });
+      }
+      showToast(tier === 'free' ? 'Welcome to Level Up Fitness' : `30-day ${tier === 'elite_trial' ? 'Elite' : 'Pro'} trial started`, 'success');
+    }
+    return (
+      <div style={{ minHeight:'100vh', overflowY:'auto', padding:'30px 20px 60px', background:'linear-gradient(180deg,#0c0c18 0%,#1a1530 100%)' }}>
+        <div style={{ textAlign:'center', marginBottom:24 }}>
+          <div style={{ fontSize:38, marginBottom:6 }}>🎯</div>
+          <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:30, color:'#fff', letterSpacing:1.5 }}>PICK YOUR PLAN</div>
+          <div style={{ fontSize:12, color:'#888', marginTop:6 }}>Try Pro or Elite free for 30 days — no card required.</div>
+        </div>
+        {plans.map(p => (
+          <div key={p.tier} style={{ background:`${p.color}10`, borderRadius:18, padding:'18px 18px', marginBottom:14, border:`1.5px solid ${p.color}40`, position:'relative' }}>
+            {p.highlight && <div style={{ position:'absolute', top:-9, left:18, background:p.color, color:'#000', fontSize:10, fontWeight:800, padding:'3px 10px', borderRadius:10, letterSpacing:0.5 }}>{p.highlight}</div>}
+            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'baseline', marginBottom:4 }}>
+              <div style={{ fontFamily:"'Oswald',sans-serif", fontSize:20, fontWeight:800, color:p.color, letterSpacing:1 }}>{p.label}</div>
+              <div>
+                <span style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:24, color:'#fff' }}>{p.price}</span>
+                <span style={{ fontSize:11, color:'#666', marginLeft:3 }}>/mo</span>
+              </div>
+            </div>
+            <div style={{ fontSize:11, color:'#888', marginBottom:10 }}>{p.calls} · {p.sub}</div>
+            <ul style={{ margin:0, padding:'0 0 0 18px', fontSize:12, color:'#ccc', lineHeight:1.7, marginBottom:14 }}>
+              {p.features.map(f => <li key={f}>{f}</li>)}
+            </ul>
+            <button onClick={() => choosePlan(p.tier)} style={{ width:'100%', padding:13, borderRadius:12, border:'none', background:p.color, color:'#000', fontFamily:"'Oswald',sans-serif", fontSize:14, fontWeight:800, cursor:'pointer', letterSpacing:0.6 }}>{p.cta}</button>
+          </div>
+        ))}
+        <div style={{ fontSize:11, color:'#3a4a5a', textAlign:'center', marginTop:18, lineHeight:1.6 }}>
+          You can change plans anytime in Profile.<br/>Trial auto-downgrades to Free after 30 days unless you upgrade.
         </div>
       </div>
     );
@@ -4625,6 +5291,58 @@ Write a 4-sentence weekly review: 1) What went well (cite a specific number), 2)
       const { data } = await _sb.from('profiles').select('plan').eq('id', uid).maybeSingle();
       setUserPlan(data?.plan ?? 'free');
     } catch(e) { console.warn('fetchUserPlan error', e); }
+    fetchCookbookUnlocks(uid);
+  }
+
+  /* Owner emails — these accounts auto-unlock all builtin cookbooks (you bought them).
+     Everyone else stays gated and must upload their own copy. */
+  const OWNER_EMAILS = ['drewpridemore12@gmail.com'];
+
+  async function fetchCookbookUnlocks(uid) {
+    if (!_sb || !uid) return;
+    try {
+      const { data, error } = await _sb.from('cookbook_unlocks').select('cookbook_id').eq('user_id', uid);
+      if (error) { console.warn('fetchCookbookUnlocks error', error); return; }
+      const ids = (data || []).map(r => r.cookbook_id).filter(Boolean);
+      if (ids.length) setCookbookUnlocks(prev => Array.from(new Set([...prev, ...ids])));
+    } catch(e) { console.warn('fetchCookbookUnlocks exception', e); }
+
+    // Owner auto-grant: if signed in as an owner email, unlock all builtin cookbooks
+    try {
+      const { data: { user } } = await _sb.auth.getUser();
+      const email = (user?.email || '').toLowerCase();
+      if (OWNER_EMAILS.includes(email)) {
+        const builtinIds = ['tastyshreds'];
+        const existing = await _sb.from('cookbook_unlocks').select('cookbook_id').eq('user_id', uid);
+        const have = new Set((existing.data || []).map(r => r.cookbook_id));
+        for (const cbId of builtinIds) {
+          if (!have.has(cbId)) {
+            await _sb.from('cookbook_unlocks').insert({
+              user_id: uid,
+              cookbook_id: cbId,
+              cookbook_name: cbId === 'tastyshreds' ? 'Tasty Shreds' : cbId,
+              source: 'owner_auto',
+              recipe_count: cbId === 'tastyshreds' ? TASTY_SHREDS_RECIPES.length : 0,
+            });
+          }
+        }
+        setCookbookUnlocks(prev => Array.from(new Set([...prev, ...builtinIds])));
+      }
+    } catch(e) { console.warn('owner auto-grant failed', e); }
+  }
+
+  async function recordCookbookUnlock(cookbookId, name, source = 'upload', recipeCount = 0) {
+    setCookbookUnlocks(prev => prev.includes(cookbookId) ? prev : [...prev, cookbookId]);
+    if (!_sb || !currentUser) return;
+    try {
+      await _sb.from('cookbook_unlocks').insert({
+        user_id: currentUser.id,
+        cookbook_id: cookbookId,
+        cookbook_name: name,
+        source,
+        recipe_count: recipeCount,
+      });
+    } catch(e) { console.warn('recordCookbookUnlock failed', e); }
   }
 
   async function handleUpgrade(tier) {
@@ -4639,6 +5357,48 @@ Write a 4-sentence weekly review: 1) What went well (cite a specific number), 2)
       window.location.href = data.url;
     } catch(e) { showToast('Network error', 'error'); }
     setUpgradeLoading('');
+  }
+
+  /* ── Rewarded ad: 30-sec watch-to-earn +5 AI uses ── */
+  function startRewardedAd() {
+    setShowRewardedAd(true);
+    setRewardReady(false);
+    setRewardCountdown(30);
+    let t = 30;
+    rewardTimerRef.current = setInterval(() => {
+      t--;
+      setRewardCountdown(t);
+      if (t <= 0) {
+        clearInterval(rewardTimerRef.current);
+        setRewardReady(true);
+      }
+    }, 1000);
+  }
+
+  function cancelRewardedAd() {
+    clearInterval(rewardTimerRef.current);
+    setShowRewardedAd(false);
+    setRewardReady(false);
+    setRewardCountdown(0);
+  }
+
+  async function claimReward() {
+    const BONUS = 5;
+    // Optimistic UI
+    setAiRemaining(r => r !== null ? r + BONUS : BONUS);
+    cancelRewardedAd();
+    showToast(`+${BONUS} AI uses added! 🎉`, 'success');
+    // Persist to Supabase: decrement today's usage count by BONUS so router sees more headroom
+    if (_sb && currentUser) {
+      try {
+        const today = new Date().toISOString().split('T')[0];
+        const { data: row } = await _sb.from('ai_usage').select('count').eq('user_id', currentUser.id).eq('date', today).maybeSingle();
+        if (row) {
+          const newCount = Math.max(0, (row.count || 0) - BONUS);
+          await _sb.from('ai_usage').update({ count: newCount }).eq('user_id', currentUser.id).eq('date', today);
+        }
+      } catch {}
+    }
   }
 
   async function handleSignIn() {
@@ -4714,7 +5474,7 @@ Write a 4-sentence weekly review: 1) What went well (cite a specific number), 2)
     ];
 
     const totalWorkouts = vault.length;
-    const totalRecipes  = saved.length + TASTY_SHREDS_RECIPES.length;
+    const totalRecipes  = saved.length + getEntitledRecipes().length;
     const totalEntries  = entries.length;
     const inp = { width: '100%', padding: '11px 14px', borderRadius: 12, border: '1px solid rgba(255,255,255,0.12)', background: 'rgba(255,255,255,0.05)', color: '#fff', fontSize: 13, fontFamily: 'inherit', outline: 'none', marginBottom: 8 };
 
@@ -5254,11 +6014,17 @@ Write a 4-sentence weekly review: 1) What went well (cite a specific number), 2)
                 {currentUser ? (
                   <div>
                     <div style={{ fontSize: 12, color: '#ddd', marginBottom: 6 }}>✓ Signed in as <span style={{ color: '#4BDE80' }}>{currentUser.email}</span></div>
-                    <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:10 }}>
+                    <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:8, flexWrap:'wrap' }}>
                       <span style={{ fontSize:11, fontWeight:700, padding:'3px 10px', borderRadius:20, background: userPlan==='elite' ? 'rgba(168,85,247,0.2)' : userPlan==='pro' ? 'rgba(75,222,128,0.15)' : 'rgba(255,255,255,0.06)', color: userPlan==='elite' ? '#a855f7' : userPlan==='pro' ? '#4BDE80' : '#4a6a7a', border:`1px solid ${userPlan==='elite'?'rgba(168,85,247,0.4)':userPlan==='pro'?'rgba(75,222,128,0.3)':'rgba(255,255,255,0.08)'}` }}>
                         {userPlan==='elite' ? '⚡ ELITE' : userPlan==='pro' ? '⭐ PRO' : '🆓 FREE'}
                       </span>
+                      {aiRemaining !== null && (
+                        <span onClick={() => aiRemaining === 0 && setShowPaywall(true)} style={{ fontSize:11, padding:'3px 10px', borderRadius:20, border:`1px solid ${aiRemaining===0?'rgba(255,107,74,0.5)':aiRemaining<=3?'rgba(245,200,66,0.4)':'rgba(255,255,255,0.1)'}`, background: aiRemaining===0?'rgba(255,107,74,0.12)':aiRemaining<=3?'rgba(245,200,66,0.08)':'rgba(255,255,255,0.04)', color: aiRemaining===0?'#FF6B4A':aiRemaining<=3?'#F5C842':'#555', cursor: aiRemaining===0?'pointer':'default' }}>
+                          🧠 {aiRemaining}/{aiLimit} left
+                        </span>
+                      )}
                       {userPlan === 'free' && <button onClick={() => setShowPaywall(true)} style={{ fontSize:11, padding:'3px 10px', borderRadius:20, border:'1px solid rgba(75,222,128,0.4)', background:'rgba(75,222,128,0.1)', color:'#4BDE80', fontWeight:700, cursor:'pointer' }}>UPGRADE ↑</button>}
+                      {userPlan === 'free' && <button onClick={startRewardedAd} style={{ fontSize:11, padding:'3px 10px', borderRadius:20, border:'1px solid rgba(245,200,66,0.4)', background:'rgba(245,200,66,0.08)', color:'#F5C842', fontWeight:700, cursor:'pointer' }}>📺 +5 USES</button>}
                     </div>
                     <div style={{ display: 'flex', gap: 8 }}>
                       <button onClick={() => syncProfileToSupabase(currentUser)} style={{ flex: 1, padding: '9px 8px', borderRadius: 10, border: '1px solid rgba(75,222,128,0.3)', background: 'rgba(75,222,128,0.1)', color: '#4BDE80', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>⬆ SYNC NOW</button>
@@ -5871,6 +6637,28 @@ Include 5-7 exercises. No explanation, just JSON.`;
     { id: 'profile', icon: userAvatar, label: 'Me' },
   ];
 
+  /* HARD AUTH GATE — must be signed in before anything else */
+  if (!currentUser) {
+    return (
+      <div style={{ height: '100%', background: '#0c0c18', color: '#fff', fontFamily: "'SF Pro Display',-apple-system,BlinkMacSystemFont,sans-serif", maxWidth: 500, margin: '0 auto' }}>
+        <style>{`@import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Oswald:wght@400;500;600;700&display=swap');input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;}`}</style>
+        {SignupGate()}
+        {toast && <div className="pop" style={{ position: 'fixed', bottom: 40, left: '50%', transform: 'translateX(-50%)', padding: '11px 20px', borderRadius: 24, background: 'rgba(75,222,128,0.96)', color: '#000', fontWeight: 700, fontSize: 13, zIndex: 900 }}>{toast.msg}</div>}
+      </div>
+    );
+  }
+
+  /* Plan picker — after account creation, must pick a plan before entering app */
+  if (currentUser && !userPlan_chosen) {
+    return (
+      <div style={{ height: '100%', background: '#0c0c18', color: '#fff', fontFamily: "'SF Pro Display',-apple-system,BlinkMacSystemFont,sans-serif", maxWidth: 500, margin: '0 auto' }}>
+        <style>{`@import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Oswald:wght@400;500;600;700&display=swap');input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;}`}</style>
+        {PlanPickerScreen()}
+        {toast && <div className="pop" style={{ position: 'fixed', bottom: 40, left: '50%', transform: 'translateX(-50%)', padding: '11px 20px', borderRadius: 24, background: 'rgba(75,222,128,0.96)', color: '#000', fontWeight: 700, fontSize: 13, zIndex: 900 }}>{toast.msg}</div>}
+      </div>
+    );
+  }
+
   /* Show onboarding if not yet completed */
   if (!onboarded) {
     return (
@@ -5907,6 +6695,12 @@ Include 5-7 exercises. No explanation, just JSON.`;
         {screen === 'level'      && LevelScreen()}
       </div>
 
+      {/* AdSense banner — free users only. Activate by: 1) get publisher ID from adsense.google.com 2) uncomment script in <head> 3) replace ca-pub-XXXXX 4) remove display:none class */}
+      {userPlan === 'free' && (
+        <div className="adsbygoogle-placeholder" style={{ width:'100%', height:50, background:'rgba(255,255,255,0.02)', borderTop:'1px solid rgba(255,255,255,0.04)', display:'flex', alignItems:'center', justifyContent:'center' }}>
+          <ins className="adsbygoogle" style={{ display:'block', width:'100%', height:50 }} data-ad-client="ca-pub-XXXXXXXXXXXXXXXXX" data-ad-slot="XXXXXXXXXX" data-ad-format="banner" />
+        </div>
+      )}
       <div style={{ display: 'flex', background: 'rgba(10,10,20,0.98)', borderTop: '1px solid rgba(255,255,255,0.06)', paddingBottom: 'max(env(safe-area-inset-bottom),4px)', flexShrink: 0 }}>
         {NAV.map(({ id, icon, label }) => {
           const active = screen === id;
@@ -5940,6 +6734,146 @@ Include 5-7 exercises. No explanation, just JSON.`;
       {showBarcode && <BarcodeScanner onScan={handleBarcodeScan} onClose={() => setShowBarcode(false)} />}
       {showSettings && SettingsModal()}
       {showAuth && AuthModal()}
+
+      {/* ── VOICE LOG CONFIRM ── */}
+      {showVoiceConfirm && (
+        <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.88)', zIndex:900, display:'flex', alignItems:'flex-end', justifyContent:'center' }}>
+          <div className="pop" style={{ width:'100%', maxWidth:480, background:'#0e1120', borderRadius:'24px 24px 0 0', padding:'24px 20px 36px', border:'1px solid rgba(255,255,255,0.08)', maxHeight:'80vh', overflowY:'auto' }}>
+            <div style={{ textAlign:'center', marginBottom:16 }}>
+              <div style={{ fontSize:32, marginBottom:6 }}>🎤</div>
+              <div style={{ fontFamily:"'Oswald',sans-serif", fontSize:18, fontWeight:700, color:'#fff' }}>LOG THESE FOODS?</div>
+              {voiceTranscript && <div style={{ fontSize:11, color:'#4a6a7a', marginTop:4, fontStyle:'italic' }}>"{voiceTranscript}"</div>}
+            </div>
+            {voiceItems.map((item, i) => (
+              <div key={i} style={{ background:'rgba(255,255,255,0.04)', borderRadius:14, padding:'12px 14px', marginBottom:8, border:'1px solid rgba(255,255,255,0.06)', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+                <div>
+                  <div style={{ fontSize:14, color:'#ddd', fontWeight:600 }}>{item.name}</div>
+                  <div style={{ fontSize:11, color:'#555', marginTop:2 }}>{item.protein}g P · {item.carbs}g C · {item.fat}g F</div>
+                </div>
+                <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:18, color:'#FF6B4A' }}>{item.calories}</div>
+              </div>
+            ))}
+            <div style={{ display:'flex', gap:10, marginTop:16 }}>
+              <button onClick={() => { setShowVoiceConfirm(false); setVoiceItems([]); setVoiceTranscript(''); }} style={{ flex:1, padding:13, borderRadius:14, border:'1px solid rgba(255,255,255,0.08)', background:'transparent', color:'#4a6a7a', fontFamily:"'Oswald',sans-serif", fontSize:14, fontWeight:700, cursor:'pointer' }}>CANCEL</button>
+              <button onClick={confirmVoiceLog} style={{ flex:2, padding:13, borderRadius:14, border:'none', background:'#4BDE80', color:'#000', fontFamily:"'Oswald',sans-serif", fontSize:16, fontWeight:800, cursor:'pointer', letterSpacing:0.5 }}>LOG ALL ({voiceItems.length})</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── COOKBOOK IMPORT MODAL ── */}
+      {showCookbookImport && (
+        <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.92)', zIndex:900, display:'flex', alignItems:'flex-end', justifyContent:'center' }}>
+          <div className="pop" style={{ width:'100%', maxWidth:480, background:'#0e1120', borderRadius:'24px 24px 0 0', padding:'24px 20px 32px', border:'1px solid rgba(168,85,247,0.25)', maxHeight:'92vh', overflowY:'auto' }}>
+            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:14 }}>
+              <div>
+                <div style={{ fontFamily:"'Oswald',sans-serif", fontSize:18, color:'#fff' }}>📚 Upload Cookbook</div>
+                <div style={{ fontSize:11, color:'#4a6a7a' }}>Paste cookbook text — AI extracts the recipes</div>
+              </div>
+              <button onClick={() => setShowCookbookImport(false)} style={{ background:'transparent', border:'none', color:'#666', fontSize:24, cursor:'pointer' }}>×</button>
+            </div>
+
+            {cookbookExtractedRecipes.length === 0 ? (
+              <>
+                <input value={cookbookImportName} onChange={e => setCookbookImportName(e.target.value)} placeholder="Cookbook name (e.g. The Anabolic Cookbook)" style={{ width:'100%', padding:'10px 12px', borderRadius:10, border:'1px solid rgba(255,255,255,0.1)', background:'rgba(255,255,255,0.04)', color:'#fff', fontSize:13, fontFamily:'inherit', marginBottom:8, boxSizing:'border-box' }} />
+                <input value={cookbookImportAuthor} onChange={e => setCookbookImportAuthor(e.target.value)} placeholder="Author (optional)" style={{ width:'100%', padding:'10px 12px', borderRadius:10, border:'1px solid rgba(255,255,255,0.1)', background:'rgba(255,255,255,0.04)', color:'#fff', fontSize:13, fontFamily:'inherit', marginBottom:8, boxSizing:'border-box' }} />
+
+                <input type="file" accept=".txt,.md,.pdf" onChange={async e => {
+                  const f = e.target.files?.[0]; if (!f) return;
+                  if (f.name.toLowerCase().endsWith('.pdf')) {
+                    try {
+                      if (!window.pdfjsLib) {
+                        await new Promise((res, rej) => {
+                          const s = document.createElement('script');
+                          s.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
+                          s.onload = res; s.onerror = rej; document.head.appendChild(s);
+                        });
+                        window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+                      }
+                      const buf = await f.arrayBuffer();
+                      const pdf = await window.pdfjsLib.getDocument({ data: buf }).promise;
+                      let txt = '';
+                      const maxPages = Math.min(pdf.numPages, 60);
+                      for (let i = 1; i <= maxPages; i++) {
+                        const page = await pdf.getPage(i);
+                        const tc = await page.getTextContent();
+                        txt += tc.items.map(it => it.str).join(' ') + '\n\n';
+                      }
+                      setCookbookImportText(txt);
+                      showToast(`Loaded ${maxPages} pages of PDF`, 'success');
+                    } catch(err) {
+                      console.warn('PDF parse failed', err);
+                      showToast('Could not parse PDF — try copy/paste instead', 'error');
+                    }
+                  } else {
+                    const txt = await f.text();
+                    setCookbookImportText(txt);
+                    showToast(`Loaded ${(txt.length/1000).toFixed(1)}k chars`, 'success');
+                  }
+                }} style={{ width:'100%', padding:'8px', fontSize:11, color:'#4a6a7a', marginBottom:8 }} />
+
+                <textarea value={cookbookImportText} onChange={e => setCookbookImportText(e.target.value)} placeholder="…or paste cookbook text here. Pages with recipe names, macros, and ingredients work best." rows={10} style={{ width:'100%', padding:'10px 12px', borderRadius:10, border:'1px solid rgba(255,255,255,0.1)', background:'rgba(255,255,255,0.04)', color:'#fff', fontSize:12, fontFamily:'inherit', resize:'vertical', boxSizing:'border-box', marginBottom:10 }} />
+
+                <button onClick={extractRecipesFromCookbook} disabled={cookbookImportLoading} style={{ width:'100%', padding:13, borderRadius:12, border:'none', background:'#A855F7', color:'#000', fontFamily:"'Oswald',sans-serif", fontSize:14, fontWeight:800, cursor:'pointer', letterSpacing:0.5, opacity: cookbookImportLoading ? 0.6 : 1 }}>
+                  {cookbookImportLoading ? '⏳ EXTRACTING…' : '✨ EXTRACT RECIPES WITH AI'}
+                </button>
+                <div style={{ fontSize:10, color:'#4a6a7a', marginTop:10, lineHeight:1.5 }}>
+                  Costs 1 AI call. Long books may need multiple imports (paste a chapter at a time).
+                </div>
+              </>
+            ) : (
+              <>
+                <div style={{ fontSize:12, color:'#4BDE80', marginBottom:8 }}>Found {cookbookExtractedRecipes.length} recipes. Tap to deselect any you don't want.</div>
+                <div style={{ display:'flex', gap:8, marginBottom:10 }}>
+                  <button onClick={() => setCookbookSelectedIds(new Set(cookbookExtractedRecipes.map(r => r.id)))} style={{ flex:1, padding:'7px 10px', borderRadius:8, border:'1px solid rgba(255,255,255,0.1)', background:'transparent', color:'#aaa', fontSize:11, cursor:'pointer' }}>Select all</button>
+                  <button onClick={() => setCookbookSelectedIds(new Set())} style={{ flex:1, padding:'7px 10px', borderRadius:8, border:'1px solid rgba(255,255,255,0.1)', background:'transparent', color:'#aaa', fontSize:11, cursor:'pointer' }}>Clear</button>
+                </div>
+                <div style={{ maxHeight:'45vh', overflowY:'auto', border:'1px solid rgba(255,255,255,0.06)', borderRadius:10, marginBottom:12 }}>
+                  {cookbookExtractedRecipes.map(r => {
+                    const selected = cookbookSelectedIds.has(r.id);
+                    return (
+                      <div key={r.id} onClick={() => {
+                        const next = new Set(cookbookSelectedIds);
+                        if (selected) next.delete(r.id); else next.add(r.id);
+                        setCookbookSelectedIds(next);
+                      }} style={{ padding:'10px 12px', borderBottom:'1px solid rgba(255,255,255,0.04)', cursor:'pointer', background: selected ? 'rgba(168,85,247,0.08)' : 'transparent' }}>
+                        <div style={{ display:'flex', alignItems:'center', gap:10 }}>
+                          <div style={{ width:18, height:18, borderRadius:4, border:`1.5px solid ${selected?'#A855F7':'#444'}`, background: selected?'#A855F7':'transparent', flexShrink:0, display:'flex', alignItems:'center', justifyContent:'center', fontSize:11, color:'#000', fontWeight:700 }}>{selected ? '✓' : ''}</div>
+                          <div style={{ flex:1 }}>
+                            <div style={{ fontSize:13, color:'#fff', fontWeight:600 }}>{r.name}</div>
+                            <div style={{ fontSize:10, color:'#4a6a7a', marginTop:2 }}>{r.calories} cal · {r.protein}g P · {r.carbs}g C · {r.fat}g F · {r.ingredients.length} ingredients</div>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+                <div style={{ display:'flex', gap:8 }}>
+                  <button onClick={() => { setCookbookExtractedRecipes([]); setCookbookSelectedIds(new Set()); }} style={{ flex:1, padding:12, borderRadius:12, border:'1px solid rgba(255,255,255,0.1)', background:'transparent', color:'#aaa', fontFamily:"'Oswald',sans-serif", fontSize:13, fontWeight:700, cursor:'pointer' }}>← BACK</button>
+                  <button onClick={commitImportedCookbook} style={{ flex:2, padding:12, borderRadius:12, border:'none', background:'#4BDE80', color:'#000', fontFamily:"'Oswald',sans-serif", fontSize:13, fontWeight:800, cursor:'pointer', letterSpacing:0.5 }}>ADD {cookbookSelectedIds.size} RECIPES</button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── COOKBOOK PAYWALL (per-cookbook unlock prompt) ── */}
+      {showCookbookPaywall && (
+        <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.92)', zIndex:900, display:'flex', alignItems:'center', justifyContent:'center', padding:24 }}>
+          <div className="pop" style={{ width:'100%', maxWidth:380, background:'#0e1120', borderRadius:20, padding:'28px 22px', border:'1px solid rgba(245,200,66,0.3)', textAlign:'center' }}>
+            <div style={{ fontSize:42, marginBottom:8 }}>🔒</div>
+            <div style={{ fontFamily:"'Oswald',sans-serif", fontSize:18, color:'#fff', marginBottom:6 }}>{showCookbookPaywall.name}</div>
+            <div style={{ fontSize:12, color:'#4a6a7a', marginBottom:18 }}>{showCookbookPaywall.tagline} · {showCookbookPaywall.author}</div>
+            <div style={{ fontSize:12, color:'#aaa', marginBottom:18, lineHeight:1.5 }}>This cookbook is locked because the author sells it. Two ways to unlock it:</div>
+            <button onClick={() => { setShowCookbookPaywall(null); setShowCookbookImport(true); setCookbookImportName(showCookbookPaywall.name); setCookbookImportAuthor(showCookbookPaywall.author||''); }} style={{ width:'100%', padding:13, borderRadius:12, border:'none', background:'#A855F7', color:'#000', fontFamily:"'Oswald',sans-serif", fontSize:14, fontWeight:800, cursor:'pointer', marginBottom:10, letterSpacing:0.5 }}>📤 I OWN A COPY — UPLOAD IT</button>
+            {showCookbookPaywall.builtin && (
+              <button onClick={() => { recordCookbookUnlock(showCookbookPaywall.id, showCookbookPaywall.name, 'admin_grant', showCookbookPaywall.recipes.length); setShowCookbookPaywall(null); showToast(`Unlocked ${showCookbookPaywall.name}`, 'success'); }} style={{ width:'100%', padding:13, borderRadius:12, border:'1px solid rgba(75,222,128,0.4)', background:'rgba(75,222,128,0.08)', color:'#4BDE80', fontFamily:"'Oswald',sans-serif", fontSize:13, fontWeight:700, cursor:'pointer', letterSpacing:0.5 }}>🛒 BUY ACCESS (placeholder — Stripe TODO)</button>
+            )}
+            <button onClick={() => setShowCookbookPaywall(null)} style={{ width:'100%', marginTop:10, padding:11, borderRadius:12, border:'1px solid rgba(255,255,255,0.08)', background:'transparent', color:'#4a6a7a', fontFamily:"'Oswald',sans-serif", fontSize:13, fontWeight:700, cursor:'pointer' }}>MAYBE LATER</button>
+          </div>
+        </div>
+      )}
 
       {/* ── PAYWALL MODAL ── */}
       {showPaywall && (
@@ -5981,9 +6915,40 @@ Include 5-7 exercises. No explanation, just JSON.`;
               </div>
             ))}
 
+            {userPlan === 'free' && (
+              <button onClick={() => { setShowPaywall(false); startRewardedAd(); }} style={{ width:'100%', marginTop:10, padding:13, borderRadius:14, border:'1px solid rgba(245,200,66,0.4)', background:'rgba(245,200,66,0.08)', color:'#F5C842', fontFamily:"'Oswald',sans-serif", fontSize:14, fontWeight:700, cursor:'pointer', letterSpacing:0.5 }}>
+                📺 WATCH AD FOR +5 AI USES
+              </button>
+            )}
             <button onClick={() => setShowPaywall(false)} style={{ width:'100%', marginTop:8, padding:13, borderRadius:14, border:'1px solid rgba(255,255,255,0.08)', background:'transparent', color:'#4a6a7a', fontFamily:"'Oswald',sans-serif", fontSize:14, fontWeight:700, cursor:'pointer' }}>
               MAYBE LATER
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── REWARDED AD MODAL ── */}
+      {showRewardedAd && (
+        <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.95)', zIndex:1000, display:'flex', alignItems:'center', justifyContent:'center', padding:24 }}>
+          <div className="pop" style={{ width:'100%', maxWidth:340, background:'#0e1120', borderRadius:24, padding:'32px 24px', border:'1px solid rgba(245,200,66,0.3)', textAlign:'center' }}>
+            {!rewardReady ? (
+              <>
+                <div style={{ fontSize:48, marginBottom:12 }}>📺</div>
+                <div style={{ fontFamily:"'Oswald',sans-serif", fontSize:20, fontWeight:700, color:'#fff', marginBottom:6 }}>WATCHING AD</div>
+                <div style={{ fontSize:12, color:'#4a6a7a', marginBottom:24 }}>Stay here to earn +5 AI uses</div>
+                <div style={{ width:100, height:100, borderRadius:'50%', border:'4px solid rgba(245,200,66,0.2)', borderTop:`4px solid #F5C842`, display:'flex', alignItems:'center', justifyContent:'center', margin:'0 auto 24px', animation:'spin 1s linear infinite' }}>
+                  <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:32, color:'#F5C842' }}>{rewardCountdown}</div>
+                </div>
+                <button onClick={cancelRewardedAd} style={{ padding:'10px 28px', borderRadius:12, border:'1px solid rgba(255,255,255,0.08)', background:'transparent', color:'#4a6a7a', fontFamily:"'Oswald',sans-serif", fontSize:13, fontWeight:700, cursor:'pointer' }}>SKIP</button>
+              </>
+            ) : (
+              <>
+                <div style={{ fontSize:52, marginBottom:12 }}>🎉</div>
+                <div style={{ fontFamily:"'Oswald',sans-serif", fontSize:22, fontWeight:700, color:'#fff', marginBottom:6 }}>YOU EARNED +5 USES!</div>
+                <div style={{ fontSize:13, color:'#4a6a7a', marginBottom:24 }}>Keep grinding. Upgrade for unlimited.</div>
+                <button onClick={claimReward} style={{ width:'100%', padding:14, borderRadius:14, border:'none', background:'#F5C842', color:'#000', fontFamily:"'Oswald',sans-serif", fontSize:17, fontWeight:800, cursor:'pointer', letterSpacing:0.5 }}>CLAIM REWARD</button>
+              </>
+            )}
           </div>
         </div>
       )}
@@ -6049,7 +7014,7 @@ Include 5-7 exercises. No explanation, just JSON.`;
 
 /* ── SERVICE WORKER ── */
 if ('serviceWorker' in navigator) {
-  const sw = `const C='drews-hub-v31';self.addEventListener('install',e=>{e.waitUntil(caches.open(C).then(c=>c.addAll(['.'])));self.skipWaiting();});self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==C).map(k=>caches.delete(k)))));self.clients.claim();});self.addEventListener('fetch',e=>{if(e.request.method!=='GET')return;const u=e.request.url;if(u.includes('api.anthropic.com')||u.includes('openfoodfacts')||u.includes('themealdb')||u.includes('fonts.googleapis')||u.includes('cdnjs')||u.includes('supabase.co'))return;e.respondWith(caches.match(e.request).then(r=>r||fetch(e.request).then(res=>{if(res&&res.ok){const cl=res.clone();caches.open(C).then(c=>c.put(e.request,cl));}return res;})));});`;
+  const sw = `const C='drews-hub-v38';self.addEventListener('install',e=>{e.waitUntil(caches.open(C).then(c=>c.addAll(['.'])));self.skipWaiting();});self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==C).map(k=>caches.delete(k)))));self.clients.claim();});self.addEventListener('fetch',e=>{if(e.request.method!=='GET')return;const u=e.request.url;if(u.includes('api.anthropic.com')||u.includes('openfoodfacts')||u.includes('themealdb')||u.includes('fonts.googleapis')||u.includes('cdnjs')||u.includes('supabase.co'))return;e.respondWith(caches.match(e.request).then(r=>r||fetch(e.request).then(res=>{if(res&&res.ok){const cl=res.clone();caches.open(C).then(c=>c.put(e.request,cl));}return res;})));});`;
   try { navigator.serviceWorker.register(URL.createObjectURL(new Blob([sw], { type: 'application/javascript' }))).catch(() => {}); } catch {}
 }
 
